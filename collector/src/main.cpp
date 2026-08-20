@@ -123,9 +123,10 @@ class Database {
     }
     if (!exec("CREATE TABLE IF NOT EXISTS devices ("
               "device_id TEXT PRIMARY KEY,"
-              "device_name TEXT NOT NULL,"
-              "first_seen_sequence INTEGER NOT NULL,"
-              "last_seen_sequence INTEGER NOT NULL)")) {
+              "device_name TEXT NOT NULL)")) {
+      return false;
+    }
+    if (!migrate_devices()) {
       return false;
     }
     if (!exec("CREATE TABLE IF NOT EXISTS raw_input_events ("
@@ -154,10 +155,8 @@ class Database {
         sqlite3_prepare_v2(
             db_,
             "INSERT INTO devices "
-            "(device_id, device_name, first_seen_sequence, last_seen_sequence) "
-            "VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(device_id) DO UPDATE SET "
-            "device_name=excluded.device_name, last_seen_sequence=excluded.last_seen_sequence",
+            "(device_id, device_name) VALUES (?, ?) "
+            "ON CONFLICT(device_id) DO UPDATE SET device_name=excluded.device_name",
             -1, &device_statement_, nullptr) != SQLITE_OK ||
         sqlite3_prepare_v2(
             db_,
@@ -192,15 +191,13 @@ class Database {
     return path_;
   }
 
-  void record_device(libinput_device* device, std::uint64_t sequence) {
+  void record_device(libinput_device* device) {
     if (!enabled_) return;
     if (!begin_batch()) return;
     const std::string id = device_id(device);
     const std::string name = device_name(device);
     sqlite3_bind_text(device_statement_, 1, id.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(device_statement_, 2, name.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(device_statement_, 3, static_cast<sqlite3_int64>(sequence));
-    sqlite3_bind_int64(device_statement_, 4, static_cast<sqlite3_int64>(sequence));
     if (sqlite3_step(device_statement_) != SQLITE_DONE) {
       disable(last_error("could not persist device"));
       return;
@@ -309,6 +306,47 @@ class Database {
     return true;
   }
 
+  bool has_column(const char* table, const char* column, bool& present) {
+    sqlite3_stmt* statement = nullptr;
+    const std::string sql = std::string("PRAGMA table_info(") + table + ")";
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &statement, nullptr) != SQLITE_OK) {
+      disable(last_error("could not inspect database schema"));
+      return false;
+    }
+    present = false;
+    while (sqlite3_step(statement) == SQLITE_ROW) {
+      const unsigned char* name = sqlite3_column_text(statement, 1);
+      if (name && std::strcmp(reinterpret_cast<const char*>(name), column) == 0) {
+        present = true;
+        break;
+      }
+    }
+    sqlite3_finalize(statement);
+    return true;
+  }
+
+  bool migrate_devices() {
+    bool has_first_seen = false;
+    bool has_last_seen = false;
+    if (!has_column("devices", "first_seen_sequence", has_first_seen) ||
+        !has_column("devices", "last_seen_sequence", has_last_seen)) {
+      return false;
+    }
+    if (!has_first_seen && !has_last_seen) return true;
+
+    // Older Slice 2 databases stored run-local sequence values in this global
+    // identity table. Keep the identity and move lifecycle meaning to the raw
+    // DEVICE_ADDED/DEVICE_REMOVED rows, which are run-scoped.
+    return exec("BEGIN TRANSACTION") && exec("DROP TABLE IF EXISTS devices_migrated") &&
+           exec("CREATE TABLE devices_migrated ("
+                "device_id TEXT PRIMARY KEY,"
+                "device_name TEXT NOT NULL)") &&
+           exec("INSERT OR IGNORE INTO devices_migrated (device_id, device_name) "
+                "SELECT device_id, device_name FROM devices") &&
+           exec("DROP TABLE devices") && exec("ALTER TABLE devices_migrated RENAME TO devices") &&
+           exec("COMMIT");
+  }
+
   bool begin_batch() {
     if (pending_rows_ != 0) return true;
     return exec("BEGIN TRANSACTION");
@@ -333,7 +371,7 @@ class Database {
     if (!message.empty()) {
       std::cerr << "mouseprint-collector: warning: " << message << "\n";
     }
-    if (db_ && pending_rows_ > 0) {
+    if (db_) {
       sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
     }
     pending_rows_ = 0;
@@ -369,8 +407,8 @@ void print_device_event(Database& database, const char* kind, libinput_device* d
   RawEvent event;
   event.sequence = sequence;
   event.device_id = device_id(device);
-  event.event_type = kind == std::string("ADD") ? "DEVICE_ADDED" : "DEVICE_REMOVED";
-  database.record_device(device, sequence);
+  event.event_type = std::strcmp(kind, "ADD") == 0 ? "DEVICE_ADDED" : "DEVICE_REMOVED";
+  database.record_device(device);
   database.record_event(event);
   std::cout << "DEVICE_" << kind << " seq=" << sequence
             << " id=" << device_id(device)
@@ -529,9 +567,6 @@ int main(int argc, char** argv) {
     return argc > 1 && std::string(argv[1]) == "--help" ? 0 : 1;
   }
 
-  Database database;
-  const bool database_enabled = database.open(database_path);
-
   udev* udev_context = udev_new();
   if (!udev_context) {
     return fail("could not initialize udev");
@@ -557,6 +592,11 @@ int main(int argc, char** argv) {
     return fail("could not obtain libinput event fd");
   }
 
+  // Do not create a collector run until the input observer is initialized.
+  // This prevents startup failures from looking like interrupted recordings.
+  Database database;
+  const bool database_enabled = database.open(database_path);
+
   std::cout << "MOUSEPRINT_READY seat=seat0 input_fd=" << input_fd
             << " mode=non-exclusive-pointer-observer"
             << " persistence=" << (database_enabled ? "enabled" : "disabled")
@@ -565,6 +605,7 @@ int main(int argc, char** argv) {
 
   std::uint64_t sequence = 0;
   if (libinput_dispatch(context) != 0) {
+    database.finish(sequence);
     libinput_unref(context);
     udev_unref(udev_context);
     return fail("initial libinput dispatch failed");
