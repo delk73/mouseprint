@@ -1240,8 +1240,14 @@ class ContextCorrelator {
   void add_context(Database& database, const ContextSnapshot& snapshot) {
     const sqlite3_int64 context_id = database.record_context(snapshot);
     if (context_id == 0) return;
-    if (!snapshot.has_cursor) return;
-    contexts_.push_back({context_id, snapshot.sample_monotonic_us});
+    all_contexts_.push_back({context_id, snapshot.sample_monotonic_us, snapshot.has_cursor});
+    if (snapshot.has_cursor) {
+      contexts_.push_back({context_id, snapshot.sample_monotonic_us});
+    }
+    while (!all_contexts_.empty() &&
+           all_contexts_.front().sample_time_us + retention_us < snapshot.sample_monotonic_us) {
+      all_contexts_.pop_front();
+    }
     while (!contexts_.empty() &&
            contexts_.front().sample_time_us + retention_us < snapshot.sample_monotonic_us) {
       contexts_.pop_front();
@@ -1252,7 +1258,7 @@ class ContextCorrelator {
   void add_input(Database& database, sqlite3_int64 raw_event_id, std::uint64_t source_time_us) {
     if (raw_event_id == 0) return;
     pending_.push_back({raw_event_id, source_time_us});
-    if (!contexts_.empty()) finalize_ready(database, contexts_.back().sample_time_us);
+    if (!all_contexts_.empty()) finalize_ready(database, all_contexts_.back().sample_time_us);
   }
 
   void finish(Database& database) {
@@ -1266,6 +1272,12 @@ class ContextCorrelator {
   struct ContextRef {
     sqlite3_int64 id;
     std::uint64_t sample_time_us;
+  };
+
+  struct ContextObservation {
+    sqlite3_int64 id;
+    std::uint64_t sample_time_us;
+    bool valid;
   };
 
   struct PendingInput {
@@ -1283,7 +1295,19 @@ class ContextCorrelator {
 
   void finalize_one(Database& database, const PendingInput& input) {
     if (contexts_.empty()) {
-      database.record_match(input.raw_event_id, 0, "unmatched_no_context", 0, tolerance_us_);
+      bool failed_in_window = false;
+      for (const ContextObservation& observation : all_contexts_) {
+        if (!observation.valid &&
+            absolute_delta(input.source_time_us, observation.sample_time_us) <= tolerance_us_) {
+          failed_in_window = true;
+          break;
+        }
+      }
+      database.record_match(input.raw_event_id, 0,
+                            failed_in_window ? "unmatched_context_error"
+                                             : (all_contexts_.empty() ? "unmatched_no_context"
+                                                                       : "unmatched_outside_tolerance"),
+                            0, tolerance_us_);
       return;
     }
     const ContextRef* nearest = &contexts_.front();
@@ -1295,11 +1319,25 @@ class ContextCorrelator {
         nearest_absolute = candidate;
       }
     }
-    const std::int64_t delta = signed_delta(nearest->sample_time_us, input.source_time_us);
+    if (nearest_absolute <= tolerance_us_) {
+      const std::int64_t delta = signed_delta(nearest->sample_time_us, input.source_time_us);
+      database.record_match(input.raw_event_id, nearest->id, "matched", delta, tolerance_us_);
+      return;
+    }
+
+    bool failed_in_window = false;
+    for (const ContextObservation& observation : all_contexts_) {
+      if (!observation.valid &&
+          absolute_delta(input.source_time_us, observation.sample_time_us) <= tolerance_us_) {
+        failed_in_window = true;
+        break;
+      }
+    }
     database.record_match(input.raw_event_id, nearest->id,
-                          nearest_absolute <= tolerance_us_ ? "matched"
-                                                            : "unmatched_outside_tolerance",
-                          delta, tolerance_us_);
+                          failed_in_window ? "unmatched_context_error"
+                                           : "unmatched_outside_tolerance",
+                          signed_delta(nearest->sample_time_us, input.source_time_us),
+                          tolerance_us_);
   }
 
   static std::uint64_t absolute_delta(std::uint64_t left, std::uint64_t right) {
@@ -1316,6 +1354,7 @@ class ContextCorrelator {
 
   const std::uint64_t tolerance_us_;
   std::deque<ContextRef> contexts_;
+  std::deque<ContextObservation> all_contexts_;
   std::deque<PendingInput> pending_;
 };
 

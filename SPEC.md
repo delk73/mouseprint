@@ -340,6 +340,12 @@ absolute_delta_us = 820
 
 Do not hide synchronization uncertainty.
 
+If no valid context sample qualifies and a failed or unavailable context sample
+falls within the event's correlation window, use
+`match_status = unmatched_context_error`. A healthy sample gap with no failed
+sample in that window remains `unmatched_outside_tolerance`; no observed
+context at all is `unmatched_no_context`.
+
 Raw libinput evidence remains immutable. Correlation is stored separately from
 both raw input and compositor context, and only MOTION, BUTTON_DOWN,
 BUTTON_UP, and SCROLL rows are eligible for correlation.
