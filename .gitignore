@@ -1,0 +1,14 @@
+# Editors
+*.swp
+*.swo
+
+# Local Mouseprint data
+*.db
+*.db-shm
+*.db-wal
+data/
+
+# Build output
+target/
+build/
+dist/
