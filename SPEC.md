@@ -32,7 +32,7 @@ Core thesis:
 Mouseprint v0.1 shall:
 
 1. Capture pointer motion from libinput.
-2. Preserve both accelerated and unaccelerated motion data where exposed.
+2. Preserve unaccelerated motion and independently collected accelerated motion data where exposed.
 3. Capture button and scroll events.
 4. Associate low-level events with compositor-space cursor position where practical.
 5. Associate events with monitor and active application/window context where practical.
@@ -95,7 +95,8 @@ Use five conceptual layers.
                │
 ┌──────────────┴───────────────┐
 │       libinput Capture       │
-│ raw + accelerated motion    │
+│ raw + collector-transformed │
+│ motion                      │
 │ buttons / scroll / device   │
 └──────────────────────────────┘
 ```
@@ -110,7 +111,7 @@ The capture layer should not know about heatmaps, accessibility interpretation, 
 
 # 4. Measurement Domains
 
-Mouseprint shall explicitly distinguish at least two measurement domains.
+Mouseprint shall explicitly distinguish three measurement domains.
 
 ## Device-space behavior
 
@@ -128,9 +129,28 @@ device-space acceleration
 device-space curvature
 ```
 
-## Screen-space behavior
+## Collector transform domain
 
-Derived from accelerated motion and compositor cursor position.
+Derived from the accelerated deltas returned by Mouseprint's independent
+libinput context.
+
+This is a libinput transformation observation, not authoritative compositor
+output. The collector's accelerated deltas may differ from the deltas produced
+by Hyprland's own libinput context because the contexts may use different
+acceleration settings, configuration, or processing state.
+
+Examples:
+
+```text
+dx_accelerated_collector
+dy_accelerated_collector
+collector transform gain
+collector-space velocity
+```
+
+## Compositor-space behavior
+
+Derived from Hyprland cursor position and displacement.
 
 Represents what the user actually experiences on screen.
 
@@ -139,9 +159,9 @@ Examples:
 ```text
 cursor_x
 cursor_y
-screen displacement
-screen-space velocity
-screen-space path efficiency
+compositor displacement
+compositor-space velocity
+compositor-space path efficiency
 click approach geometry
 ```
 
@@ -151,7 +171,7 @@ Every derived metric should document its source domain.
 
 ---
 
-# 5. Why Preserve Both
+# 5. Why Preserve Three Domains
 
 One long-term purpose of Mouseprint is distinguishing:
 
@@ -159,7 +179,7 @@ One long-term purpose of Mouseprint is distinguishing:
 user/device behavior
 ```
 
-from:
+from the collector's independent libinput transformation and:
 
 ```text
 desktop transformation
@@ -170,7 +190,7 @@ For example:
 ```text
 stable device-space motion
         +
-high screen-space overshoot
+        high compositor-space overshoot
         ↓
 possible gain/acceleration/UI interaction issue
 ```
@@ -180,12 +200,13 @@ versus:
 ```text
 irregular device-space corrections
         +
-similar screen-space corrections
+        similar compositor-space corrections
         ↓
 different class of interaction behavior
 ```
 
-Mouseprint v0.1 does **not** interpret these diagnostically.
+Collector-accelerated deltas are not a substitute for compositor cursor
+displacement. Mouseprint v0.1 does **not** interpret differences diagnostically.
 
 It preserves enough evidence to investigate them later.
 
@@ -232,8 +253,8 @@ InputEvent {
     device_id
     event_type
 
-    dx
-    dy
+    dx_accelerated_collector
+    dy_accelerated_collector
 
     dx_unaccelerated
     dy_unaccelerated
@@ -440,7 +461,8 @@ Do not overwrite raw input with derived values.
 
 # 14. Motion Features
 
-Calculate separately where useful for device-space and screen-space behavior.
+Calculate separately where useful for device-space, collector-transform, and
+compositor-space behavior.
 
 ## Device-space
 
@@ -457,10 +479,10 @@ Optional:
 * jerk
 * movement magnitude distribution
 
-## Screen-space
+## Compositor-space
 
 * cursor distance
-* screen velocity
+* compositor-space velocity
 * displacement
 * path geometry
 * trajectory efficiency
@@ -468,9 +490,12 @@ Optional:
 
 ---
 
-# 15. Acceleration Transformation Metrics
+# 15. Collector Transformation Metrics
 
-Because both accelerated and unaccelerated deltas are available, preserve basic transformation information.
+Because both accelerated and unaccelerated deltas are available, preserve the
+collector's basic transformation information. These metrics describe the
+independent collector libinput context; they do not describe Hyprland's actual
+screen transformation.
 
 For each motion event where meaningful:
 
@@ -478,15 +503,15 @@ For each motion event where meaningful:
 raw_magnitude =
 sqrt(dx_unaccelerated² + dy_unaccelerated²)
 
-screen_input_magnitude =
-sqrt(dx² + dy²)
+collector_accelerated_magnitude =
+sqrt(dx_accelerated_collector² + dy_accelerated_collector²)
 ```
 
 Possible derived value:
 
 ```text
-gain =
-screen_input_magnitude / raw_magnitude
+collector_gain =
+collector_accelerated_magnitude / raw_magnitude
 ```
 
 Handle zero magnitude safely.
@@ -495,7 +520,7 @@ Aggregate later as distributions rather than treating one event's gain as meanin
 
 Potential future metrics:
 
-* median gain
+* median collector gain
 * gain by raw velocity
 * gain variation
 * direction-dependent transformation
@@ -520,20 +545,21 @@ pause, slowing, or click
 movement episode ends
 ```
 
-Represent both domains where possible.
+Represent device-space and compositor-space trajectories where possible, and
+retain collector-transform values separately when they are available.
 
 ```text
 MovementEpisode {
     start_time
     end_time
 
-    start_screen_position
-    end_screen_position
+    start_compositor_position
+    end_compositor_position
 
     device_path_distance
-    screen_path_distance
+    compositor_path_distance
 
-    screen_displacement
+    compositor_displacement
 
     duration
     event_count
@@ -550,14 +576,14 @@ Do not treat initial thresholds as normative.
 
 # 17. Path Efficiency
 
-Path efficiency is primarily a screen-space metric.
+Path efficiency is primarily a compositor-space metric.
 
 ```text
 displacement =
-distance(start_screen_position, end_screen_position)
+distance(start_compositor_position, end_compositor_position)
 
 actual_distance =
-sum(screen trajectory segment lengths)
+sum(compositor trajectory segment lengths)
 
 path_efficiency =
 displacement / actual_distance
@@ -580,7 +606,7 @@ Do not label all non-straight motion as waste.
 
 ---
 
-# 18. Device-Space vs Screen-Space Efficiency
+# 18. Device-Space, Collector-Transform, and Compositor-Space Efficiency
 
 Where useful, preserve analogous geometry for device-space motion.
 
@@ -588,13 +614,17 @@ This lets future analysis compare:
 
 ```text
 device-space trajectory
-        ↓ acceleration transform
-screen-space trajectory
+        ↓ collector libinput transformation
+collector-transform trajectory
+        ↓ Hyprland's independent processing and compositor state
+compositor-space trajectory
 ```
 
 Do not assume a one-to-one relationship.
 
-This comparison is one of the reasons libinput is the primary measurement source.
+This comparison is one of the reasons libinput is the primary measurement
+source, while Hyprland cursor position remains the authoritative compositor
+domain.
 
 ---
 
@@ -608,7 +638,7 @@ For episodes ending in a click, derive:
 * dwell before click
 * direction reversals
 * corrective submovements
-* screen-space travel before click
+* compositor-space travel before click
 * device-space travel before click
 
 Investigate a simple overshoot/correction heuristic.
@@ -648,10 +678,10 @@ device-space pre-click motion
 and:
 
 ```text
-screen-space pre-click trajectory
+compositor-space pre-click trajectory
 ```
 
-Normalize the final screen-space click position to:
+Normalize the final compositor-space click position to:
 
 ```text
 (0, 0)
@@ -718,13 +748,13 @@ Example:
 Browser
     screen path efficiency
     corrections/click
-    screen travel
+    compositor travel
     device travel
 
 Terminal
     screen path efficiency
     corrections/click
-    screen travel
+    compositor travel
     device travel
 ```
 
@@ -771,7 +801,7 @@ Potential profile dimensions:
 ```text
 device-space velocity distribution
 device-space acceleration distribution
-screen-space velocity distribution
+compositor-space velocity distribution
 path-efficiency distribution
 movement-distance distribution
 click-approach distribution
@@ -779,7 +809,7 @@ corrections-per-click distribution
 dwell distribution
 scroll behavior
 screen-region use
-acceleration gain distribution
+collector acceleration-gain distribution
 ```
 
 Prefer:
@@ -829,20 +859,25 @@ unless such interpretation is later validated.
 
 ---
 
-# 27. Dual-Domain Visualization
+# 27. Three-Domain Visualization
 
-At least one UI view should make the device/screen distinction visible.
+At least one UI view should make the device, collector-transform, and
+compositor distinctions visible.
 
 For example:
 
 ```text
-PHYSICAL INPUT
+DEVICE INPUT
 
 raw motion       124,802 units
 median velocity  ...
 corrections      ...
 
-DESKTOP RESULT
+COLLECTOR TRANSFORM
+accelerated motion ...
+collector gain     ...
+
+COMPOSITOR RESULT
 
 cursor travel    2.31 km
 path efficiency  0.81
@@ -857,19 +892,21 @@ The exact raw units should be labeled correctly rather than pretending they are 
 
 Stretch goal:
 
-Show how the desktop transforms device motion.
+Show how the collector transforms device motion, while keeping the separate
+compositor result visible when available.
 
 Possible representation:
 
 ```text
 raw movement magnitude
         ↓
-pointer acceleration
+collector libinput acceleration/transformation
         ↓
-accelerated movement magnitude
+collector-accelerated movement magnitude
 ```
 
-Even a basic distribution or median gain is useful.
+Even a basic distribution or median collector gain is useful. It must not be
+presented as the desktop's authoritative compositor-space gain.
 
 Do not claim that high or low gain is undesirable.
 
@@ -877,7 +914,7 @@ Do not claim that high or low gain is undesirable.
 
 # 29. Heatmap
 
-Provide at least one screen-space heatmap.
+Provide at least one compositor-space heatmap.
 
 Possible modes:
 
@@ -901,7 +938,7 @@ Possible options:
 
 ### Recent path
 
-Last several seconds of screen-space movement.
+Last several seconds of compositor-space movement.
 
 ### Sample episode
 
@@ -1118,7 +1155,7 @@ Keep the native collector independent of the Omarchy UI.
 
 # 39. Four-Day Execution Plan
 
-## Day 1 — Capture Both Sides
+## Day 1 — Capture Input Evidence
 
 Goal:
 
@@ -1131,7 +1168,7 @@ Implement:
 * libinput collector
 * device identification
 * motion events
-* accelerated deltas
+* collector-accelerated deltas
 * unaccelerated deltas
 * button events
 * scroll events
@@ -1152,9 +1189,9 @@ End-of-day test:
 Move the mouse deliberately through known patterns and verify:
 
 ```text
-raw/unaccelerated motion exists
-accelerated motion exists
-screen cursor position changes coherently
+raw/unaccelerated device motion exists
+collector-accelerated motion exists
+compositor cursor position changes coherently
 button events align
 timing is plausible
 ```
@@ -1171,11 +1208,11 @@ Implement:
 
 * movement segmentation
 * device-space path metrics
-* screen-space path metrics
+* compositor-space path metrics
 * velocity
 * acceleration
 * path efficiency
-* pointer gain
+* collector gain
 * click-associated movement
 * correction/reversal heuristic
 * pre-click traces
@@ -1195,7 +1232,7 @@ Movement episodes:         3,821
 Clicks:                    911
 Median path efficiency:    0.81
 Median corrections/click:  1
-Median pointer gain:       ...
+Median collector gain:     ...
 ```
 
 ---
@@ -1212,11 +1249,11 @@ Include:
 
 * recording state
 * session summary
-* screen travel
+* compositor travel
 * device-space activity
 * path efficiency
 * corrections
-* pointer gain summary
+* collector gain summary
 * heatmap
 * trajectory inspection
 
@@ -1258,7 +1295,7 @@ Compare behavior with two different pointer acceleration settings without changi
 ## Capture
 
 * libinput motion is recorded continuously.
-* Accelerated motion values are preserved.
+* Collector-accelerated motion values are preserved and labeled as such.
 * Unaccelerated motion values are preserved where available.
 * Button events are captured.
 * Scroll events are captured.
@@ -1267,7 +1304,7 @@ Compare behavior with two different pointer acceleration settings without changi
 
 ## Context
 
-* Screen cursor position can be associated with input data.
+* Compositor cursor position can be associated with input data.
 * Monitor identity is preserved.
 * Context-correlation uncertainty is represented rather than hidden.
 
@@ -1281,7 +1318,7 @@ Compare behavior with two different pointer acceleration settings without changi
 ## Analysis
 
 * Device-space velocity calculation has tests.
-* Screen-space velocity calculation has tests.
+* Compositor-space velocity calculation has tests.
 * Path efficiency has tests.
 * Pointer-gain calculation has tests.
 * Click-associated movement can be extracted.
@@ -1291,7 +1328,7 @@ Compare behavior with two different pointer acceleration settings without changi
 
 * User can summon Mouseprint from Omarchy.
 * Recording state is obvious.
-* User can inspect both device-space and screen-space summaries.
+* User can inspect device-space, collector-transform, and compositor-space summaries.
 * At least one heatmap works.
 * At least one trajectory can be inspected.
 
@@ -1369,8 +1406,8 @@ At the end of four days, a user on Omarchy should be able to:
 
 1. Install and enable Mouseprint.
 2. Use the desktop normally.
-3. Accumulate local libinput and screen-space pointer evidence.
-4. Preserve accelerated and unaccelerated motion separately.
+3. Accumulate local libinput, collector-transform, and compositor-space pointer evidence.
+4. Preserve unaccelerated and collector-accelerated motion separately.
 5. Summon Mouseprint.
 6. See how far the cursor traveled.
 7. Inspect low-level device motion characteristics.
@@ -1397,4 +1434,3 @@ later behavioral-security research
 ```
 
 without claiming any of those problems are already solved.
-
