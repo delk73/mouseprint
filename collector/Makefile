@@ -26,4 +26,4 @@ $(TEST_TARGET): $(TEST_SOURCE) $(SOURCE)
 	$(CXX) $(CXXFLAGS) $< $(LDLIBS) -o $@
 
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) $(TEST_TARGET)
