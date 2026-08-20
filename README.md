@@ -26,7 +26,10 @@ Compositor samples are stored in `pointer_context`; links to eligible raw
 motion, button, and scroll rows are stored in `input_context_matches`. Raw
 input rows remain unchanged and immutable. Context matching uses the nearest
 sample within an initial 25,000 microsecond tolerance, recording signed
-`context_delta_us` and `absolute_delta_us`.
+`context_delta_us` and `absolute_delta_us`. Failed context samples are retained;
+eligible input with no qualifying valid sample in a failed sampling window is
+classified as `unmatched_context_error`, distinct from a healthy sparse-sample
+miss.
 
 Hyprland cursor position/displacement is the authoritative compositor-domain
 observation. Collector-accelerated values are not authoritative screen-space
