@@ -224,7 +224,7 @@ Mouseprint
 │   └── libinput event acquisition
 │
 ├── context bridge
-│   └── Hyprland cursor/window/monitor state
+│   └── timestamped Hyprland cursor/window/monitor state
 │
 ├── analysis/storage
 │   └── derived metrics and sessions
@@ -238,6 +238,11 @@ Do not force libinput acquisition into QML.
 Native capture should remain independent from the presentation layer.
 
 Hyprland is primarily used for compositor context, not as the sole input measurement source.
+
+The compositor context bridge is independent of libinput capture. It uses the
+persistent Hyprland event socket for state changes and direct request-socket
+JSON queries for cursor position and initial state. Context capture must not
+block the libinput loop.
 
 ---
 
@@ -281,7 +286,11 @@ Conceptual structure:
 
 ```text
 PointerContext {
-    timestamp_monotonic
+    sample_monotonic_us
+    request_start_us
+    request_end_us
+    request_latency_us
+    sample_status
 
     cursor_x
     cursor_y
@@ -297,6 +306,10 @@ PointerContext {
 Avoid arbitrary window-title capture by default.
 
 Application identifiers/window classes are preferred.
+
+Hyprland cursor position and displacement are the authoritative compositor-
+domain observations. Collector-accelerated libinput deltas remain a separate
+collector-transform domain and must not be used as a substitute.
 
 ---
 
@@ -321,10 +334,15 @@ Example:
 
 ```text
 context_status = matched
-context_age_us = 820
+context_delta_us = -820
+absolute_delta_us = 820
 ```
 
 Do not hide synchronization uncertainty.
+
+Raw libinput evidence remains immutable. Correlation is stored separately from
+both raw input and compositor context, and only MOTION, BUTTON_DOWN,
+BUTTON_UP, and SCROLL rows are eligible for correlation.
 
 ---
 
@@ -445,7 +463,17 @@ dx
 dy
 button
 scroll
-cursor context
+
+COMPOSITOR CONTEXT (separate)
+cursor position
+monitor
+workspace
+active application/window class
+
+CORRELATION (separate)
+context_delta_us
+absolute_delta_us
+match status
 
 DERIVED
 velocity
@@ -1018,6 +1046,7 @@ Suggested logical tables:
 devices
 raw_input_events
 pointer_context
+input_context_matches
 movement_episodes
 click_features
 sessions
@@ -1028,11 +1057,20 @@ If synchronization is easier with one correlated event table later, that can be 
 
 Do not prematurely denormalize.
 
+`raw_input_events` must not gain compositor columns or be overwritten. The
+`pointer_context` table stores compositor samples independently, and
+`input_context_matches` stores nearest-sample links and uncertainty.
+
 ---
 
 # 34. Sampling and Event Fidelity
 
 Before choosing downsampling, measure actual libinput event volume.
+
+An initial implementation may sample Hyprland cursor position at 60 Hz using
+direct request-socket JSON queries. This is an implementation choice to be
+measured for request latency, success rate, CPU cost, and correlation quality;
+it is not a permanent product sampling requirement.
 
 Investigate:
 
@@ -1066,6 +1104,11 @@ algorithm
 
 Use monotonic timestamps for event correlation and movement calculations.
 
+Use `CLOCK_MONOTONIC` for bridge event receipt and cursor request start/end
+timestamps. Record the cursor sample timestamp as the request midpoint. Keep
+the signed `context_delta_us` and its absolute value `absolute_delta_us`; do
+not use an ambiguous context-age field.
+
 Do not rely solely on wall-clock timestamps for:
 
 * velocity
@@ -1087,6 +1130,7 @@ Requirements:
 * no heavy synchronous processing per event
 * batched persistence where appropriate
 * analysis decoupled from input capture
+* Hyprland IPC must not block the libinput capture loop
 * low idle CPU
 * bounded memory
 * collector failure must not interfere with pointer operation
@@ -1304,9 +1348,12 @@ Compare behavior with two different pointer acceleration settings without changi
 
 ## Context
 
-* Compositor cursor position can be associated with input data.
+* Hyprland cursor position/displacement is the authoritative compositor-domain observation.
 * Monitor identity is preserved.
-* Context-correlation uncertainty is represented rather than hidden.
+* Compositor samples are stored separately from raw input evidence.
+* Correlation is stored separately from both raw input and compositor samples.
+* Context-correlation uncertainty is represented with signed `context_delta_us` and `absolute_delta_us`.
+* Only motion, button, and scroll rows are correlated.
 
 ## Data
 
