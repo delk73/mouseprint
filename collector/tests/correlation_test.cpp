@@ -9,7 +9,9 @@
 namespace {
 
 std::string run_scenario(const std::string& name, const std::vector<ContextSnapshot>& contexts,
-                         std::uint64_t input_time_us, const std::string& expected) {
+                         std::uint64_t input_time_us, const std::string& expected,
+                         bool verify_context_error = false, bool verify_no_context = false,
+                         std::uint64_t expected_failed_time_us = 0) {
   const std::string path = "/tmp/mouseprint-correlation-" + name + ".sqlite3";
   std::filesystem::remove(path);
   std::filesystem::remove(path + "-wal");
@@ -39,13 +41,38 @@ std::string run_scenario(const std::string& name, const std::vector<ContextSnaps
          SQLITE_OK);
   sqlite3_stmt* statement = nullptr;
   assert(sqlite3_prepare_v2(verification_db,
-                            "select match_status from input_context_matches", -1, &statement,
-                            nullptr) == SQLITE_OK);
+                            "select match_status, context_id, context_delta_us, "
+                            "absolute_delta_us, tolerance_us from input_context_matches limit 1",
+                            -1, &statement, nullptr) == SQLITE_OK);
   assert(sqlite3_step(statement) == SQLITE_ROW);
   const std::string actual = reinterpret_cast<const char*>(sqlite3_column_text(statement, 0));
+  assert(actual == expected);
+  if (verify_no_context) {
+    assert(sqlite3_column_type(statement, 1) == SQLITE_NULL);
+    assert(sqlite3_column_type(statement, 2) == SQLITE_NULL);
+    assert(sqlite3_column_type(statement, 3) == SQLITE_NULL);
+  }
+  if (verify_context_error) {
+    sqlite3_stmt* failed_statement = nullptr;
+    assert(sqlite3_prepare_v2(verification_db,
+                              "select context_id from pointer_context "
+                              "where sample_status='cursor_request_failed' "
+                              "order by abs(sample_monotonic_us - 100000) limit 1",
+                              -1, &failed_statement, nullptr) == SQLITE_OK);
+    assert(sqlite3_step(failed_statement) == SQLITE_ROW);
+    const sqlite3_int64 failed_context_id = sqlite3_column_int64(failed_statement, 0);
+    sqlite3_finalize(failed_statement);
+    assert(sqlite3_column_type(statement, 1) == SQLITE_INTEGER);
+    assert(sqlite3_column_int64(statement, 1) == failed_context_id);
+    assert(sqlite3_column_int64(statement, 2) ==
+           static_cast<sqlite3_int64>(expected_failed_time_us) -
+               static_cast<sqlite3_int64>(input_time_us));
+    assert(sqlite3_column_int64(statement, 3) ==
+           static_cast<sqlite3_int64>(input_time_us - expected_failed_time_us));
+    assert(sqlite3_column_int64(statement, 4) == 25000);
+  }
   sqlite3_finalize(statement);
   sqlite3_close(verification_db);
-  assert(actual == expected);
   return actual;
 }
 
@@ -76,9 +103,11 @@ int main() {
                       "matched") == "matched");
   assert(run_scenario("healthy-gap", {valid_context(0), valid_context(130000)}, 100000,
                       "unmatched_outside_tolerance") == "unmatched_outside_tolerance");
-  assert(run_scenario("no-context", {}, 100000, "unmatched_no_context") ==
+  assert(run_scenario("no-context", {}, 100000, "unmatched_no_context", false, true) ==
          "unmatched_no_context");
-  assert(run_scenario("context-error", {valid_context(0), failed_context(100000)}, 100000,
-                      "unmatched_context_error") == "unmatched_context_error");
+  assert(run_scenario("context-error", {valid_context(0), failed_context(90000),
+                                         failed_context(99000)},
+                      100000, "unmatched_context_error", true, false, 99000) ==
+         "unmatched_context_error");
   std::cout << "correlation classification tests passed\n";
 }

@@ -1295,18 +1295,17 @@ class ContextCorrelator {
 
   void finalize_one(Database& database, const PendingInput& input) {
     if (contexts_.empty()) {
-      bool failed_in_window = false;
-      for (const ContextObservation& observation : all_contexts_) {
-        if (!observation.valid &&
-            absolute_delta(input.source_time_us, observation.sample_time_us) <= tolerance_us_) {
-          failed_in_window = true;
-          break;
-        }
+      std::uint64_t failed_absolute = 0;
+      const ContextObservation* failed = nearest_failed(input, failed_absolute);
+      if (failed) {
+        database.record_match(input.raw_event_id, failed->id, "unmatched_context_error",
+                              signed_delta(failed->sample_time_us, input.source_time_us),
+                              tolerance_us_);
+        return;
       }
       database.record_match(input.raw_event_id, 0,
-                            failed_in_window ? "unmatched_context_error"
-                                             : (all_contexts_.empty() ? "unmatched_no_context"
-                                                                       : "unmatched_outside_tolerance"),
+                            all_contexts_.empty() ? "unmatched_no_context"
+                                                  : "unmatched_outside_tolerance",
                             0, tolerance_us_);
       return;
     }
@@ -1325,19 +1324,32 @@ class ContextCorrelator {
       return;
     }
 
-    bool failed_in_window = false;
-    for (const ContextObservation& observation : all_contexts_) {
-      if (!observation.valid &&
-          absolute_delta(input.source_time_us, observation.sample_time_us) <= tolerance_us_) {
-        failed_in_window = true;
-        break;
-      }
+    std::uint64_t failed_absolute = 0;
+    const ContextObservation* failed = nearest_failed(input, failed_absolute);
+    if (failed) {
+      database.record_match(input.raw_event_id, failed->id, "unmatched_context_error",
+                            signed_delta(failed->sample_time_us, input.source_time_us),
+                            tolerance_us_);
+    } else {
+      database.record_match(input.raw_event_id, nearest->id, "unmatched_outside_tolerance",
+                            signed_delta(nearest->sample_time_us, input.source_time_us),
+                            tolerance_us_);
     }
-    database.record_match(input.raw_event_id, nearest->id,
-                          failed_in_window ? "unmatched_context_error"
-                                           : "unmatched_outside_tolerance",
-                          signed_delta(nearest->sample_time_us, input.source_time_us),
-                          tolerance_us_);
+  }
+
+  const ContextObservation* nearest_failed(const PendingInput& input,
+                                            std::uint64_t& nearest_absolute) const {
+    const ContextObservation* nearest = nullptr;
+    nearest_absolute = 0;
+    for (const ContextObservation& observation : all_contexts_) {
+      if (observation.valid) continue;
+      const std::uint64_t candidate = absolute_delta(input.source_time_us,
+                                                     observation.sample_time_us);
+      if (candidate > tolerance_us_ || (nearest && candidate >= nearest_absolute)) continue;
+      nearest = &observation;
+      nearest_absolute = candidate;
+    }
+    return nearest;
   }
 
   static std::uint64_t absolute_delta(std::uint64_t left, std::uint64_t right) {
