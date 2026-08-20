@@ -5,8 +5,8 @@ SOURCE := src/main.cpp
 PKG_CONFIG ?= pkg-config
 
 CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -Wpedantic
-CXXFLAGS += $(shell $(PKG_CONFIG) --cflags libinput libudev)
-LDLIBS := $(shell $(PKG_CONFIG) --libs libinput libudev)
+CXXFLAGS += $(shell $(PKG_CONFIG) --cflags libinput libudev sqlite3)
+LDLIBS := $(shell $(PKG_CONFIG) --libs libinput libudev sqlite3)
 
 .PHONY: all clean
 
