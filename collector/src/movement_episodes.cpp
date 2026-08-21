@@ -233,6 +233,7 @@ Metrics calculate(const Episode& episode) {
     metrics.device_path = path;
     int reversals = 0;
     const Evidence* previous = nullptr;
+    const Evidence* previous_non_zero = nullptr;
     std::vector<double> velocities;
     for (const Evidence* motion : motions) {
       if (previous) {
@@ -240,11 +241,11 @@ Metrics calculate(const Episode& episode) {
         if (delta > 0) velocities.push_back(std::hypot(motion->dx, motion->dy) /
                                              (static_cast<double>(delta) / 1000000.0));
       }
-      if (previous && (previous->dx != 0 || previous->dy != 0) &&
-          (motion->dx != 0 || motion->dy != 0) &&
-          previous->dx * motion->dx + previous->dy * motion->dy < 0) {
+      if (previous_non_zero && (motion->dx != 0 || motion->dy != 0) &&
+          previous_non_zero->dx * motion->dx + previous_non_zero->dy * motion->dy < 0) {
         ++reversals;
       }
+      if (motion->dx != 0 || motion->dy != 0) previous_non_zero = motion;
       previous = motion;
     }
     metrics.reversals = reversals;
