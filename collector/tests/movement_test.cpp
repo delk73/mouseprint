@@ -171,6 +171,85 @@ int integer_value(sqlite3* db, const char* column, const std::string& device) {
   return result;
 }
 
+struct TrajectoryPoint {
+  int ordinal = 0;
+  sqlite3_int64 raw_event_id = 0;
+  std::optional<sqlite3_int64> match_id;
+  std::uint64_t source_time_us = 0;
+  std::optional<double> device_dx, device_dy, device_x, device_y, device_path;
+  std::optional<sqlite3_int64> context_id;
+  std::optional<std::uint64_t> context_time_us;
+  std::optional<double> compositor_x, compositor_y, compositor_path;
+};
+
+TrajectoryPoint trajectory(sqlite3* db, const std::string& device, int offset) {
+  sqlite3_stmt* statement = nullptr;
+  assert(sqlite3_prepare_v2(
+             db,
+             "SELECT p.ordinal,p.raw_event_id,p.match_id,p.source_time_us,p.device_dx,"
+             "p.device_dy,p.device_cumulative_x,p.device_cumulative_y,"
+             "p.device_cumulative_path,p.context_id,p.context_sample_time_us,"
+             "p.compositor_x,p.compositor_y,p.compositor_cumulative_path "
+             "FROM movement_episode_trajectory_points p "
+             "JOIN movement_episodes e ON e.episode_id=p.episode_id "
+             "WHERE e.device_id=? ORDER BY e.start_time_us,p.ordinal LIMIT 1 OFFSET ?",
+             -1, &statement, nullptr) == SQLITE_OK);
+  sqlite3_bind_text(statement, 1, device.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(statement, 2, offset);
+  assert(sqlite3_step(statement) == SQLITE_ROW);
+  TrajectoryPoint point;
+  point.ordinal = sqlite3_column_int(statement, 0);
+  point.raw_event_id = sqlite3_column_int64(statement, 1);
+  if (sqlite3_column_type(statement, 2) != SQLITE_NULL) {
+    point.match_id = sqlite3_column_int64(statement, 2);
+  }
+  point.source_time_us = static_cast<std::uint64_t>(sqlite3_column_int64(statement, 3));
+  const auto optional_double = [&](int column) -> std::optional<double> {
+    if (sqlite3_column_type(statement, column) == SQLITE_NULL) return std::nullopt;
+    return sqlite3_column_double(statement, column);
+  };
+  point.device_dx = optional_double(4);
+  point.device_dy = optional_double(5);
+  point.device_x = optional_double(6);
+  point.device_y = optional_double(7);
+  point.device_path = optional_double(8);
+  if (sqlite3_column_type(statement, 9) != SQLITE_NULL) {
+    point.context_id = sqlite3_column_int64(statement, 9);
+  }
+  if (sqlite3_column_type(statement, 10) != SQLITE_NULL) {
+    point.context_time_us = static_cast<std::uint64_t>(sqlite3_column_int64(statement, 10));
+  }
+  point.compositor_x = optional_double(11);
+  point.compositor_y = optional_double(12);
+  point.compositor_path = optional_double(13);
+  sqlite3_finalize(statement);
+  return point;
+}
+
+int trajectory_count(sqlite3* db, const std::string& device) {
+  sqlite3_stmt* statement = nullptr;
+  assert(sqlite3_prepare_v2(
+             db,
+             "SELECT count(*) FROM movement_episode_trajectory_points p "
+             "JOIN movement_episodes e ON e.episode_id=p.episode_id WHERE e.device_id=?",
+             -1, &statement, nullptr) == SQLITE_OK);
+  sqlite3_bind_text(statement, 1, device.c_str(), -1, SQLITE_TRANSIENT);
+  assert(sqlite3_step(statement) == SQLITE_ROW);
+  const int result = sqlite3_column_int(statement, 0);
+  sqlite3_finalize(statement);
+  return result;
+}
+
+int total_trajectory_count(sqlite3* db) {
+  sqlite3_stmt* statement = nullptr;
+  assert(sqlite3_prepare_v2(db, "SELECT count(*) FROM movement_episode_trajectory_points", -1,
+                            &statement, nullptr) == SQLITE_OK);
+  assert(sqlite3_step(statement) == SQLITE_ROW);
+  const int result = sqlite3_column_int(statement, 0);
+  sqlite3_finalize(statement);
+  return result;
+}
+
 }  // namespace
 
 int main() {
@@ -186,11 +265,11 @@ int main() {
                          "('failed','failed'),('zero','zero'),('monitor','monitor'),"
                          "('workspace','workspace'),('reverse','reverse'),('missing','missing'),"
                          "('repeat','repeat'),('timing','timing'),('other','other'),"
-                         "('second','second')");
+                         "('second','second'),('gap','gap')");
 
-  motion(database, "straight", 100000, 1, 0, context(100000, 0, 0));
-  motion(database, "straight", 110000, 1, 0, context(110000, 1, 0));
-  motion(database, "straight", 120000, 1, 0, context(120000, 2, 0));
+  const auto straight_1 = motion(database, "straight", 100000, 1, 0, context(100000, 0, 0));
+  const auto straight_2 = motion(database, "straight", 110000, 1, 0, context(110000, 1, 0));
+  const auto straight_3 = motion(database, "straight", 120000, 1, 0, context(120000, 2, 0));
 
   motion(database, "curve", 300000, 3, 4, context(300000, 0, 0));
   motion(database, "curve", 310000, 0, 0, context(310000, 3, 4));
@@ -207,7 +286,8 @@ int main() {
   scroll(database, "scroll", 905000);
   motion(database, "scroll", 910000, 1, 0, context(910000, 1, 0));
 
-  motion(database, "unmatched", 1000000, 1, 0, std::nullopt, "unmatched_outside_tolerance");
+  const auto unmatched_event =
+      motion(database, "unmatched", 1000000, 1, 0, std::nullopt, "unmatched_outside_tolerance");
   motion(database, "failed", 1100000, 1, 0, std::nullopt, "unmatched_context_error");
   motion(database, "zero", 1200000, 1, 0, context(1200000, 5, 5));
   motion(database, "zero", 1210000, 1, 0, context(1210000, 5, 5));
@@ -227,12 +307,18 @@ int main() {
   const auto missing_id = database.record_event(missing);
   const auto missing_context = database.record_context(context(1610000, 1, 0));
   database.record_match(missing_id, missing_context, "matched", 0, 25000);
+  motion(database, "missing", 1620000, 2, 3, context(1620000, 2, 0));
 
   const auto repeat_context_a = database.record_context(context(1700000, 0, 0));
   const auto repeat_context_b = database.record_context(context(1720000, 1, 0));
   motion_with_context(database, "repeat", 1700000, 1, 0, repeat_context_a, 1700000);
   motion_with_context(database, "repeat", 1710000, 1, 0, repeat_context_a, 1700000);
   motion_with_context(database, "repeat", 1720000, 1, 0, repeat_context_b, 1720000);
+  const auto gap_context_a = database.record_context(context(2100000, 0, 0));
+  const auto gap_context_b = database.record_context(context(2120000, 10, 0));
+  motion_with_context(database, "gap", 2100000, 1, 0, gap_context_a, 2100000);
+  motion(database, "gap", 2110000, 1, 0, std::nullopt, "unmatched_outside_tolerance");
+  motion_with_context(database, "gap", 2120000, 1, 0, gap_context_b, 2120000);
   motion(database, "timing", 1800000, 1, 0, context(1800000, 0, 0));
   motion(database, "timing", 1801000, 1, 0, context(1810000, 1, 0));
   motion(database, "other", 1900000, 1, 0, context(1900000, 0, 0));
@@ -264,5 +350,87 @@ int main() {
   assert(std::abs(value(database.handle(), "compositor_path_distance", "repeat") - 1.0) < 1e-9);
   assert(std::abs(value(database.handle(), "compositor_peak_velocity", "repeat") - 50.0) < 1e-9);
   assert(std::abs(value(database.handle(), "device_path_distance", "other") - 2.0) < 1e-9);
+
+  assert(trajectory_count(database.handle(), "straight") == 3);
+  const TrajectoryPoint straight_point_1 = trajectory(database.handle(), "straight", 0);
+  const TrajectoryPoint straight_point_2 = trajectory(database.handle(), "straight", 1);
+  const TrajectoryPoint straight_point_3 = trajectory(database.handle(), "straight", 2);
+  assert(straight_point_1.ordinal == 0 && straight_point_1.raw_event_id == straight_1);
+  assert(straight_point_2.ordinal == 1 && straight_point_2.raw_event_id == straight_2);
+  assert(straight_point_3.ordinal == 2 && straight_point_3.raw_event_id == straight_3);
+  assert(std::abs(*straight_point_1.device_x - 1.0) < 1e-9);
+  assert(std::abs(*straight_point_2.device_x - 2.0) < 1e-9);
+  assert(std::abs(*straight_point_3.device_x - 3.0) < 1e-9);
+  assert(std::abs(*straight_point_3.device_path - 3.0) < 1e-9);
+  assert(std::abs(*straight_point_1.compositor_x - 0.0) < 1e-9);
+  assert(std::abs(*straight_point_2.compositor_x - 1.0) < 1e-9);
+  assert(std::abs(*straight_point_3.compositor_x - 2.0) < 1e-9);
+  assert(*straight_point_3.context_time_us == 120000);
+
+  assert(trajectory_count(database.handle(), "curve") == 3);
+  const TrajectoryPoint curve_point_2 = trajectory(database.handle(), "curve", 1);
+  const TrajectoryPoint curve_point_3 = trajectory(database.handle(), "curve", 2);
+  assert(std::abs(*curve_point_2.device_x - 3.0) < 1e-9);
+  assert(std::abs(*curve_point_2.device_y - 4.0) < 1e-9);
+  assert(std::abs(*curve_point_2.device_path - 5.0) < 1e-9);
+  assert(std::abs(*curve_point_3.device_x) < 1e-9);
+  assert(std::abs(*curve_point_3.device_y) < 1e-9);
+  assert(std::abs(*curve_point_3.device_path - 10.0) < 1e-9);
+
+  const TrajectoryPoint reverse_point_2 = trajectory(database.handle(), "reverse", 1);
+  assert(std::abs(*reverse_point_2.device_dx) < 1e-9);
+  assert(std::abs(*reverse_point_2.device_x - 1.0) < 1e-9);
+  assert(std::abs(*reverse_point_2.device_path - 1.0) < 1e-9);
+  assert(integer_value(database.handle(), "device_directional_reversal_count", "reverse") == 1);
+
+  const TrajectoryPoint missing_point_1 = trajectory(database.handle(), "missing", 0);
+  const TrajectoryPoint missing_point_2 = trajectory(database.handle(), "missing", 1);
+  const TrajectoryPoint missing_point_3 = trajectory(database.handle(), "missing", 2);
+  assert(std::abs(*missing_point_1.device_x - 1.0) < 1e-9);
+  assert(std::abs(*missing_point_1.device_y) < 1e-9);
+  assert(std::abs(*missing_point_1.device_path - 1.0) < 1e-9);
+  assert(!missing_point_2.device_dx);
+  assert(!missing_point_2.device_dy);
+  assert(!missing_point_2.device_x);
+  assert(!missing_point_2.device_y);
+  assert(!missing_point_2.device_path);
+  assert(std::abs(*missing_point_3.device_dx - 2.0) < 1e-9);
+  assert(std::abs(*missing_point_3.device_dy - 3.0) < 1e-9);
+  assert(!missing_point_3.device_x);
+  assert(!missing_point_3.device_y);
+  assert(!missing_point_3.device_path);
+
+  const TrajectoryPoint repeat_point_1 = trajectory(database.handle(), "repeat", 0);
+  const TrajectoryPoint repeat_point_2 = trajectory(database.handle(), "repeat", 1);
+  const TrajectoryPoint repeat_point_3 = trajectory(database.handle(), "repeat", 2);
+  assert(repeat_point_1.context_id == repeat_point_2.context_id);
+  assert(std::abs(*repeat_point_1.compositor_path) < 1e-9);
+  assert(std::abs(*repeat_point_2.compositor_path) < 1e-9);
+  assert(std::abs(*repeat_point_3.compositor_path - 1.0) < 1e-9);
+  assert(std::abs(*repeat_point_3.compositor_x - 1.0) < 1e-9);
+
+  const TrajectoryPoint gap_point_1 = trajectory(database.handle(), "gap", 0);
+  const TrajectoryPoint gap_point_2 = trajectory(database.handle(), "gap", 1);
+  const TrajectoryPoint gap_point_3 = trajectory(database.handle(), "gap", 2);
+  assert(std::abs(*gap_point_1.compositor_x) < 1e-9);
+  assert(std::abs(*gap_point_1.compositor_path) < 1e-9);
+  assert(!gap_point_2.compositor_x);
+  assert(!gap_point_2.compositor_path);
+  assert(std::abs(*gap_point_3.compositor_x - 10.0) < 1e-9);
+  assert(gap_point_3.context_id == gap_context_b);
+  assert(!gap_point_3.compositor_path);
+
+  const TrajectoryPoint unmatched_point = trajectory(database.handle(), "unmatched", 0);
+  assert(unmatched_point.raw_event_id == unmatched_event);
+  assert(unmatched_point.match_id);
+  assert(!unmatched_point.context_id);
+  assert(!unmatched_point.compositor_x);
+  assert(!unmatched_point.compositor_y);
+  assert(!unmatched_point.compositor_path);
+
+  const int original_trajectory_count = total_trajectory_count(database.handle());
+  assert(derive_movement_episodes(database.handle()));
+  assert(total_trajectory_count(database.handle()) == original_trajectory_count);
+  assert(trajectory_count(database.handle(), "straight") == 3);
   std::cout << "movement episode tests passed\n";
 }
