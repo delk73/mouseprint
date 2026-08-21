@@ -1,10 +1,10 @@
 # Mouseprint
 
 Mouseprint is a local pointing-device observatory for Omarchy/Hyprland. The
-current implementation is Slice 4: native libinput evidence capture with
+current implementation is Slice 5: native libinput evidence capture with
 separate Hyprland compositor context and local SQLite persistence.
 
-## Slice 4
+## Slice 5
 
 The collector creates a non-exclusive libinput udev context on `seat0` and
 reports pointer-capable device lifecycle events, motion, buttons, and scroll
@@ -16,7 +16,7 @@ Motion fields are deliberately labeled by domain:
 
 - `dx_unaccelerated` / `dy_unaccelerated`: device domain, in libinput raw device coordinates.
 - `dx_accelerated_collector` / `dy_accelerated_collector`: accelerated values from Mouseprint's independent libinput context.
-- Hyprland compositor-space position is not captured by this slice.
+- Hyprland compositor-space positions remain separate context evidence in `pointer_context`.
 
 The `devices` table is an identity table. Device lifecycle timing is stored in
 the run-scoped `raw_input_events` table as `DEVICE_ADDED` and `DEVICE_REMOVED`
@@ -47,6 +47,17 @@ context never produces interpolated cursor positions. Derived data may be
 absent when a collector run ends abnormally and remains recomputable from the
 evidence tables.
 
+Each motion member also has a row in `movement_episode_trajectory_points`.
+Device coordinates are cumulative unaccelerated libinput units relative to the
+episode origin; they are not physical centimeters. Zero-valued motion remains
+as a trajectory point, and unavailable unaccelerated values are represented as
+NULL rather than replaced with accelerated values. Compositor coordinates are
+Hyprland cursor coordinates from valid matched context samples. Missing
+compositor observations are not interpolated, and repeated context IDs do not
+create artificial movement. Monitor-normalized coordinates are not produced;
+monitor geometry is not currently retained as evidence and is a follow-up
+design finding.
+
 ## Build
 
 Requirements are the installed `libinput`, `libudev`, SQLite, and a C++17
@@ -72,7 +83,8 @@ normally provided by the `input` group. Root is not required.
 
 Move the mouse, click, and scroll to see human-readable evidence lines and
 verify the `collector_runs`, `devices`, `raw_input_events`, `pointer_context`,
-and `input_context_matches` tables. Stop with `Ctrl-C` or `SIGTERM`. The
+`input_context_matches`, `movement_episodes`, `movement_episode_members`, and
+`movement_episode_trajectory_points` tables. Stop with `Ctrl-C` or `SIGTERM`. The
 collector reports cursor request latency, context sample success rate, and
 queue drops on shutdown. Database or Hyprland context failures do not affect
 input observation, and the collector does not interfere with normal pointer

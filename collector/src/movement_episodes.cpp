@@ -21,6 +21,7 @@ constexpr std::uint64_t idle_gap_us = 100000;
 struct Evidence {
   sqlite3_int64 event_id = 0;
   sqlite3_int64 run_id = 0;
+  bool has_time = false;
   std::uint64_t time_us = 0;
   std::string device_id;
   std::string event_type;
@@ -30,6 +31,7 @@ struct Evidence {
   sqlite3_int64 match_id = 0;
   std::string match_status;
   sqlite3_int64 context_id = 0;
+  bool has_context_time = false;
   bool has_cursor = false;
   double cursor_x = 0;
   double cursor_y = 0;
@@ -82,7 +84,17 @@ bool create_schema(sqlite3* db) {
                  "ordinal INTEGER NOT NULL, raw_event_id INTEGER NOT NULL "
                  "REFERENCES raw_input_events(event_id),"
                  "match_id INTEGER REFERENCES input_context_matches(match_id),"
-                 "member_role TEXT NOT NULL, PRIMARY KEY (episode_id, ordinal))");
+                 "member_role TEXT NOT NULL, PRIMARY KEY (episode_id, ordinal))") &&
+         exec(db, "CREATE TABLE IF NOT EXISTS movement_episode_trajectory_points ("
+                 "episode_id INTEGER NOT NULL REFERENCES movement_episodes(episode_id),"
+                 "ordinal INTEGER NOT NULL, raw_event_id INTEGER NOT NULL "
+                 "REFERENCES raw_input_events(event_id),"
+                 "match_id INTEGER REFERENCES input_context_matches(match_id),"
+                 "source_time_us INTEGER, device_dx REAL, device_dy REAL,"
+                 "device_cumulative_x REAL, device_cumulative_y REAL,"
+                 "device_cumulative_path REAL, context_id INTEGER REFERENCES pointer_context(context_id),"
+                 "context_sample_time_us INTEGER, compositor_x REAL, compositor_y REAL,"
+                 "compositor_cumulative_path REAL, PRIMARY KEY (episode_id, ordinal))");
 }
 
 bool load_evidence(sqlite3* db, std::vector<Evidence>& result) {
@@ -103,6 +115,7 @@ bool load_evidence(sqlite3* db, std::vector<Evidence>& result) {
     Evidence evidence;
     evidence.event_id = sqlite3_column_int64(statement, 0);
     evidence.run_id = sqlite3_column_int64(statement, 1);
+    evidence.has_time = sqlite3_column_type(statement, 2) != SQLITE_NULL;
     evidence.time_us = static_cast<std::uint64_t>(sqlite3_column_int64(statement, 2));
     evidence.device_id = reinterpret_cast<const char*>(sqlite3_column_text(statement, 3));
     evidence.event_type = reinterpret_cast<const char*>(sqlite3_column_text(statement, 4));
@@ -128,6 +141,7 @@ bool load_evidence(sqlite3* db, std::vector<Evidence>& result) {
     if (evidence.has_monitor) evidence.monitor_id = sqlite3_column_int(statement, 12);
     if (evidence.has_workspace) evidence.workspace_id = sqlite3_column_int(statement, 13);
     if (sqlite3_column_type(statement, 14) != SQLITE_NULL) {
+      evidence.has_context_time = true;
       evidence.context_time_us = static_cast<std::uint64_t>(sqlite3_column_int64(statement, 14));
     }
     result.push_back(std::move(evidence));
@@ -317,6 +331,97 @@ Metrics calculate(const Episode& episode) {
   return metrics;
 }
 
+bool persist_trajectory(sqlite3* db, sqlite3_stmt* statement, const Episode& episode,
+                        sqlite3_int64 episode_id) {
+  bool device_cumulative_available = true;
+  double device_x = 0;
+  double device_y = 0;
+  double device_path = 0;
+  bool compositor_available = false;
+  bool compositor_continuous = true;
+  sqlite3_int64 previous_context = 0;
+  double previous_compositor_x = 0;
+  double previous_compositor_y = 0;
+  double compositor_path = 0;
+  int ordinal = 0;
+  for (const Member& member : episode.members) {
+    if (member.role != "motion") continue;
+    const Evidence& evidence = *member.evidence;
+    sqlite3_bind_int64(statement, 1, episode_id);
+    sqlite3_bind_int(statement, 2, ordinal++);
+    sqlite3_bind_int64(statement, 3, evidence.event_id);
+    if (evidence.match_id) sqlite3_bind_int64(statement, 4, evidence.match_id);
+    else sqlite3_bind_null(statement, 4);
+    if (evidence.has_time) sqlite3_bind_int64(statement, 5, evidence.time_us);
+    else sqlite3_bind_null(statement, 5);
+    if (evidence.has_unaccelerated) {
+      sqlite3_bind_double(statement, 6, evidence.dx);
+      sqlite3_bind_double(statement, 7, evidence.dy);
+      if (device_cumulative_available) {
+        device_x += evidence.dx;
+        device_y += evidence.dy;
+        device_path += std::hypot(evidence.dx, evidence.dy);
+        sqlite3_bind_double(statement, 8, device_x);
+        sqlite3_bind_double(statement, 9, device_y);
+        sqlite3_bind_double(statement, 10, device_path);
+      } else {
+        sqlite3_bind_null(statement, 8);
+        sqlite3_bind_null(statement, 9);
+        sqlite3_bind_null(statement, 10);
+      }
+    } else {
+      sqlite3_bind_null(statement, 6);
+      sqlite3_bind_null(statement, 7);
+      sqlite3_bind_null(statement, 8);
+      sqlite3_bind_null(statement, 9);
+      sqlite3_bind_null(statement, 10);
+      device_cumulative_available = false;
+    }
+
+    const bool has_context = evidence.match_id != 0 && evidence.context_id != 0;
+    if (has_context) sqlite3_bind_int64(statement, 11, evidence.context_id);
+    else sqlite3_bind_null(statement, 11);
+    if (has_context && evidence.has_context_time) {
+      sqlite3_bind_int64(statement, 12, evidence.context_time_us);
+    } else {
+      sqlite3_bind_null(statement, 12);
+    }
+
+    const bool has_compositor = has_context && evidence.match_status == "matched" &&
+                                evidence.has_cursor;
+    if (has_compositor) {
+      sqlite3_bind_double(statement, 13, evidence.cursor_x);
+      sqlite3_bind_double(statement, 14, evidence.cursor_y);
+      if (compositor_continuous) {
+        if (!compositor_available) {
+          compositor_available = true;
+        } else if (evidence.context_id != previous_context) {
+          compositor_path += std::hypot(evidence.cursor_x - previous_compositor_x,
+                                        evidence.cursor_y - previous_compositor_y);
+        }
+        sqlite3_bind_double(statement, 15, compositor_path);
+      } else {
+        sqlite3_bind_null(statement, 15);
+      }
+      previous_context = evidence.context_id;
+      previous_compositor_x = evidence.cursor_x;
+      previous_compositor_y = evidence.cursor_y;
+    } else {
+      sqlite3_bind_null(statement, 13);
+      sqlite3_bind_null(statement, 14);
+      sqlite3_bind_null(statement, 15);
+      compositor_continuous = false;
+    }
+    if (sqlite3_step(statement) != SQLITE_DONE) {
+      std::cerr << "movement trajectory insert failed: " << sqlite3_errmsg(db) << "\n";
+      return false;
+    }
+    sqlite3_reset(statement);
+    sqlite3_clear_bindings(statement);
+  }
+  return true;
+}
+
 bool persist(sqlite3* db, const std::vector<Episode>& episodes) {
   const char* episode_sql =
       "INSERT INTO movement_episodes (run_id,device_id,start_time_us,end_time_us,duration_us,"
@@ -328,14 +433,29 @@ bool persist(sqlite3* db, const std::vector<Episode>& episodes) {
       "compositor_peak_velocity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
   sqlite3_stmt* episode_statement = nullptr;
   sqlite3_stmt* member_statement = nullptr;
+  sqlite3_stmt* trajectory_statement = nullptr;
   if (sqlite3_prepare_v2(db, episode_sql, -1, &episode_statement, nullptr) != SQLITE_OK ||
       sqlite3_prepare_v2(db, "INSERT INTO movement_episode_members "
                             "(episode_id,ordinal,raw_event_id,match_id,member_role) "
-                            "VALUES (?,?,?,?,?)", -1, &member_statement, nullptr) != SQLITE_OK) {
+                            "VALUES (?,?,?,?,?)", -1, &member_statement, nullptr) != SQLITE_OK ||
+      sqlite3_prepare_v2(db, "INSERT INTO movement_episode_trajectory_points "
+                            "(episode_id,ordinal,raw_event_id,match_id,source_time_us,"
+                            "device_dx,device_dy,device_cumulative_x,device_cumulative_y,"
+                            "device_cumulative_path,context_id,context_sample_time_us,"
+                            "compositor_x,compositor_y,compositor_cumulative_path) "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", -1, &trajectory_statement,
+                         nullptr) != SQLITE_OK) {
     sqlite3_finalize(episode_statement);
     sqlite3_finalize(member_statement);
+    sqlite3_finalize(trajectory_statement);
     return false;
   }
+  const auto fail = [&]() {
+    sqlite3_finalize(episode_statement);
+    sqlite3_finalize(member_statement);
+    sqlite3_finalize(trajectory_statement);
+    return false;
+  };
   for (const Episode& episode : episodes) {
     const Metrics metrics = calculate(episode);
     sqlite3_bind_int64(episode_statement, 1, episode.run_id);
@@ -366,7 +486,7 @@ bool persist(sqlite3* db, const std::vector<Episode>& episodes) {
     bind_optional(24, metrics.compositor_peak);
     if (sqlite3_step(episode_statement) != SQLITE_DONE) {
       std::cerr << "movement episode insert failed: " << sqlite3_errmsg(db) << "\n";
-      return false;
+      return fail();
     }
     const sqlite3_int64 episode_id = sqlite3_last_insert_rowid(db);
     sqlite3_reset(episode_statement); sqlite3_clear_bindings(episode_statement);
@@ -380,12 +500,15 @@ bool persist(sqlite3* db, const std::vector<Episode>& episodes) {
       sqlite3_bind_text(member_statement, 5, member.role.c_str(), -1, SQLITE_TRANSIENT);
       if (sqlite3_step(member_statement) != SQLITE_DONE) {
         std::cerr << "movement member insert failed: " << sqlite3_errmsg(db) << "\n";
-        return false;
+        return fail();
       }
       sqlite3_reset(member_statement); sqlite3_clear_bindings(member_statement);
     }
+    if (!persist_trajectory(db, trajectory_statement, episode, episode_id)) return fail();
   }
-  sqlite3_finalize(episode_statement); sqlite3_finalize(member_statement);
+  sqlite3_finalize(episode_statement);
+  sqlite3_finalize(member_statement);
+  sqlite3_finalize(trajectory_statement);
   return true;
 }
 
@@ -404,7 +527,8 @@ bool derive_movement_episodes(sqlite3* db) {
     exec(db, "ROLLBACK");
     return false;
   };
-  if (!exec(db, "DELETE FROM movement_episode_members") ||
+  if (!exec(db, "DELETE FROM movement_episode_trajectory_points") ||
+      !exec(db, "DELETE FROM movement_episode_members") ||
       !exec(db, "DELETE FROM movement_episodes")) {
     std::cerr << "movement cleanup failed: " << sqlite3_errmsg(db) << "\n";
     return rollback();
