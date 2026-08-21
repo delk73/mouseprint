@@ -1,10 +1,10 @@
 # Mouseprint
 
 Mouseprint is a local pointing-device observatory for Omarchy/Hyprland. The
-current implementation is Slice 3: native libinput evidence capture with
+current implementation is Slice 4: native libinput evidence capture with
 separate Hyprland compositor context and local SQLite persistence.
 
-## Slice 3
+## Slice 4
 
 The collector creates a non-exclusive libinput udev context on `seat0` and
 reports pointer-capable device lifecycle events, motion, buttons, and scroll
@@ -35,6 +35,17 @@ Hyprland cursor position/displacement is the authoritative compositor-domain
 observation. Collector-accelerated values are not authoritative screen-space
 motion and may differ from Hyprland's own libinput acceleration and
 configuration.
+
+After correlation is finalized for a completed run, the collector derives
+movement episodes into `movement_episodes` and
+`movement_episode_members`. Episodes are independent per run and device, use a
+100,000 microsecond idle gap, and retain raw event and correlation provenance.
+Device metrics use only unaccelerated libinput deltas. Compositor geometry uses
+valid matched context samples, collapses consecutive duplicate context IDs,
+and uses context sample timestamps for compositor velocity. Missing or invalid
+context never produces interpolated cursor positions. Derived data may be
+absent when a collector run ends abnormally and remains recomputable from the
+evidence tables.
 
 ## Build
 
