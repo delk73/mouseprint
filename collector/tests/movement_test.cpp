@@ -216,6 +216,7 @@ int main() {
   motion(database, "workspace", 1400000, 1, 0, context(1400000, 0, 0, 1, 1));
   motion(database, "workspace", 1410000, 1, 0, context(1410000, 1, 0, 1, 2));
   motion(database, "reverse", 1500000, 1, 0, context(1500000, 0, 0));
+  motion(database, "reverse", 1505000, 0, 0, context(1505000, 0, 0));
   motion(database, "reverse", 1510000, -1, 0, context(1510000, 1, 0));
   motion(database, "missing", 1600000, 1, 0, context(1600000, 0, 0));
   RawEvent missing;
