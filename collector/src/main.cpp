@@ -27,6 +27,8 @@
 #include <libudev.h>
 #include <sqlite3.h>
 
+#include "movement_episodes.h"
+
 namespace {
 
 volatile std::sig_atomic_t running = 1;
@@ -299,6 +301,10 @@ class Database {
 
   const std::string& path() const {
     return path_;
+  }
+
+  sqlite3* handle() const {
+    return db_;
   }
 
   void record_device(libinput_device* device) {
@@ -1668,6 +1674,9 @@ int main(int argc, char** argv) {
             << " queue_dropped=" << context_queue.dropped() << "\n";
   std::cout.flush();
   database.finish(sequence);
+  if (database.enabled() && !derive_movement_episodes(database.handle())) {
+    std::cerr << "mouseprint-collector: warning: could not derive movement episodes\n";
+  }
   libinput_unref(context);
   udev_unref(udev_context);
   return 0;
