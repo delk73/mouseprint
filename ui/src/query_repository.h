@@ -19,6 +19,10 @@ class QueryRepository {
 
   std::vector<CompletedRunSummary> completed_runs(std::string& error) const;
   std::optional<CompletedRunSummary> latest_completed_run(std::string& error) const;
+  std::vector<SessionSummary> completed_sessions(std::string& error) const;
+  std::optional<SessionSummary> latest_session(std::string& error) const;
+  std::vector<DeviceSessionSummary> device_summaries_for_session(
+      std::int64_t session_id, std::string& error) const;
   std::vector<EpisodeSummary> episodes_for_run(std::int64_t run_id,
                                                std::string& error) const;
   std::vector<TrajectoryPoint> trajectory_for_episode(std::int64_t episode_id,

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 struct CorrelationCounts {
   std::int64_t matched = 0;
@@ -20,6 +21,37 @@ struct CompletedRunSummary {
   std::int64_t raw_motion_count = 0;
   std::int64_t movement_episode_count = 0;
   CorrelationCounts correlation_counts;
+};
+
+struct StatusCount {
+  std::string status;
+  std::int64_t count = 0;
+};
+
+struct SessionSummary {
+  std::int64_t session_id = 0;
+  std::int64_t run_id = 0;
+  std::int64_t started_wallclock_us = 0;
+  std::optional<std::int64_t> ended_wallclock_us;
+  std::optional<std::int64_t> display_duration_us;
+  std::int64_t raw_motion_count = 0;
+  std::int64_t movement_episode_count = 0;
+  CorrelationCounts correlation_counts;
+  std::vector<StatusCount> device_metric_status_counts;
+  std::vector<StatusCount> compositor_metric_status_counts;
+};
+
+struct DeviceSessionSummary {
+  std::string device_id;
+  std::optional<std::string> device_name;
+  std::int64_t raw_motion_count = 0;
+  std::int64_t episode_count = 0;
+  std::optional<double> device_path_distance_sum;
+  std::int64_t device_path_distance_available_count = 0;
+  std::int64_t device_path_distance_unavailable_count = 0;
+  std::optional<double> compositor_path_distance_sum;
+  std::int64_t compositor_path_distance_available_count = 0;
+  std::int64_t compositor_path_distance_unavailable_count = 0;
 };
 
 struct EpisodeSummary {
