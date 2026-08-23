@@ -1064,7 +1064,7 @@ The shipped inspection surfaces are:
 * Latest completed-run summary.
 * Episode list and episode metrics.
 * Selected device and compositor trajectories.
-* Evidence and match-quality indicators.
+* Correlation status.
 * Provenance inspection where useful.
 * Explicit missing-value and trajectory-gap visualization.
 
