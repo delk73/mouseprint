@@ -128,6 +128,12 @@ std::vector<SessionSummary> QueryRepository::completed_sessions(std::string& err
       "SELECT compositor_metric_status, count(*) FROM movement_episodes "
       "WHERE run_id=? AND compositor_metric_status IS NOT NULL "
       "GROUP BY compositor_metric_status ORDER BY compositor_metric_status";
+  const char* aggregate_sql =
+      "SELECT sum(compositor_path_distance), count(compositor_path_distance), "
+      "count(*) - count(compositor_path_distance), sum(device_directional_reversal_count), "
+      "count(device_directional_reversal_count), "
+      "count(*) - count(device_directional_reversal_count) "
+      "FROM movement_episodes WHERE run_id=?";
 
   auto status_counts = [&](std::int64_t run_id, const char* query,
                            std::vector<StatusCount>& counts) -> bool {
@@ -161,6 +167,24 @@ std::vector<SessionSummary> QueryRepository::completed_sessions(std::string& err
         !status_counts(run.run_id, compositor_sql, session.compositor_metric_status_counts)) {
       return {};
     }
+    sqlite3_stmt* statement = nullptr;
+    if (!prepare(database_, aggregate_sql, statement, error) ||
+        !bind_id(statement, 1, run.run_id, error, database_)) {
+      sqlite3_finalize(statement);
+      return {};
+    }
+    if (sqlite3_step(statement) != SQLITE_ROW) {
+      error = sqlite_error(database_, "could not read session aggregates");
+      sqlite3_finalize(statement);
+      return {};
+    }
+    session.compositor_path_distance_sum = optional_value<double>(statement, 0);
+    session.compositor_path_distance_available_count = sqlite3_column_int64(statement, 1);
+    session.compositor_path_distance_unavailable_count = sqlite3_column_int64(statement, 2);
+    session.directional_reversal_total = optional_value<std::int64_t>(statement, 3);
+    session.directional_reversal_available_count = sqlite3_column_int64(statement, 4);
+    session.directional_reversal_unavailable_count = sqlite3_column_int64(statement, 5);
+    sqlite3_finalize(statement);
     result.push_back(std::move(session));
   }
   return result;

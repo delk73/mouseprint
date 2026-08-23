@@ -269,6 +269,21 @@ ApplicationWindow {
                             delegate: Text { required property var modelData; text: modelData.status + ": " + modelData.count; color: "#9bb4bf"; font.pixelSize: 12 }
                         }
                     }
+                    Flow {
+                        visible: inspection.hasRun
+                        Layout.fillWidth: true
+                        spacing: 18
+                        Text { text: "Compositor-space path sum (available episodes): " + valueOrDash(inspection.selectedSession.compositorPathSum); color: "#b5c1cc" }
+                        Text { text: "available / unavailable: " + inspection.selectedSession.compositorPathAvailableCount + " / " + inspection.selectedSession.compositorPathUnavailableCount; color: "#9bb4bf" }
+                        Text { text: "Device directional reversals total: " + valueOrDash(inspection.selectedSession.directionalReversalTotal); color: "#b5c1cc" }
+                        Text { text: "available / unavailable: " + inspection.selectedSession.directionalReversalAvailableCount + " / " + inspection.selectedSession.directionalReversalUnavailableCount; color: "#9bb4bf" }
+                    }
+                    Text {
+                        visible: inspection.hasRun
+                        text: "Compositor-space path sum excludes unavailable episodes and does not imply uninterrupted cursor travel."
+                        color: "#71808e"
+                        font.pixelSize: 11
+                    }
                 }
             }
 
