@@ -37,14 +37,15 @@ The current implementation includes:
 * Evidence-safe timestamp correlation between input and context.
 * Slice 4: movement episodes and foundational device/compositor metrics.
 * Slice 5: queryable episode trajectory points.
+* Slice 6: read-only Qt Quick inspection UI over completed runs, episodes,
+  metrics, trajectories, correlation status, and provenance.
 
 ### Next
 
-* A narrow, read-only inspection UI over the existing derived data.
+* Slice 7: sessions and descriptive summaries.
 
 ### Later descriptive measurement
 
-* Explicit sessions and aggregate summaries.
 * Monitor-aware spatial products once sufficient monitor geometry is retained.
 * Click and targeting features.
 * Scroll-derived features.
@@ -74,11 +75,13 @@ unaccelerated motion and independently collected accelerated motion where
 available, then derives movement episodes, foundational metrics, and trajectory
 points from that evidence.
 
-The next product slice is a read-only inspection UI. Sessions, summaries,
-heatmaps, click features, scroll features, profiles, adaptive assistance, and
+The shipped product includes a read-only Qt Quick inspection UI over completed
+collector runs, episodes, metrics, trajectories, correlation status, and
+provenance. The next product slice is sessions and descriptive summaries.
+Heatmaps, click features, scroll features, profiles, adaptive assistance, and
 higher-level interpretation remain roadmap work. Recording pause/clear controls
 remain product requirements, but are not part of the current collector or the
-initial inspection UI.
+inspection UI.
 
 The architecture keeps capture, context/correlation, derived products, future
 aggregation, and UI as separate concerns. All data remains local.
@@ -941,31 +944,75 @@ This is intended to reveal context-specific interaction patterns, not applicatio
 
 ---
 
-# 24. Sessions (Planned)
+# 24. Sessions and Descriptive Summaries (Slice 7 Next)
 
-Define explicit Mouseprint sessions beyond collector runs.
-
-Possible boundaries:
+The initial Slice 7 session is a query-time projection of one completed
+collector run:
 
 ```text
-collector start
-long inactivity
-manual new session
-system login/logout
+session_id = collector_runs.run_id
 ```
 
-Store aggregate metrics per session.
+Only runs with `ended_wallclock_us IS NOT NULL` are sessions. Runs without a
+persisted completion timestamp are excluded, whether still active or otherwise
+incomplete. A completed run with zero episodes remains a valid session. Slice 7
+does not add a `sessions` table or persisted
+session membership, does not group multiple runs, and does not infer boundaries
+from inactivity or restart gaps.
 
-This enables future comparisons such as:
+The existing run, episode, raw-event, context, and correlation tables remain
+the provenance source. Session summaries are recomputable query-time views;
+they do not duplicate raw evidence or derived episode rows.
+
+Explicit/manual boundaries and cross-run grouping remain future work. Do not
+infer causation from session differences.
+
+Initial descriptive summaries may expose:
+
+* session/run start, end, and duration where both persisted endpoints exist;
+* raw motion count, episode count, and factual correlation-status counts;
+* distinct devices with separate per-device summaries;
+* sums of available device-space episode path distances per device;
+* sums of available compositor-space episode path distances, with unavailable
+  and invalid episodes counted separately;
+* device and compositor metric availability/status counts; and
+* per-episode observation/distribution material for path efficiency, velocity,
+  compositor displacement, and directional reversals.
+
+Device path totals must be labeled as sums of available device-space episode
+path distances in raw device units, not physical centimeters. Compositor path
+totals must not imply uninterrupted cursor travel. Unavailable values are
+excluded from numeric totals and remain visibly counted as unavailable.
+
+Path efficiency is not averaged across a session. Episode velocities are not
+globally averaged. Compositor displacement is not summed across episodes.
+Directional reversal values remain factual per-episode observations; a later
+descriptive total must not become a rate or behavioral judgment.
+
+Correlation summaries retain the four shipped statuses:
+
+```text
+matched
+unmatched_context_error
+unmatched_outside_tolerance
+unmatched_no_context
+```
+
+No matched percentage or correlation quality score is introduced. An episode
+with no available compositor evidence remains distinct from an episode
+invalidated by compositor status, and a session with no available compositor
+metrics shows an empty/unavailable summary rather than numeric zero
+measurements.
+
+This session unit enables future comparisons such as:
 
 ```text
 session A vs session B
-morning vs evening
 device A vs device B
-before vs after pointer-setting change
+before vs after a pointer-setting change
 ```
 
-Do not automatically infer causation from session differences.
+Those comparisons remain descriptive and do not establish causation.
 
 ---
 
@@ -1004,22 +1051,25 @@ over only arithmetic means.
 
 ---
 
-# 26. User Interface: Next Slice
+# 26. User Interface: Shipped Slice 6
 
-The next implementation target is a narrow, read-only inspection UI over
-existing derived data. It should feel like an instrument for inspecting
-human-computer interaction, not a second feature-extraction engine.
+Slice 6 ships a standalone Qt Quick read-only inspection UI over existing
+derived data. It uses the read-only `QueryRepository` and does not issue SQL
+from QML or derive metrics from raw events. It should feel like an instrument
+for inspecting human-computer interaction, not a second feature-extraction
+engine.
 
-Initial inspection surfaces:
+The shipped inspection surfaces are:
 
-* Recent run summary.
+* Latest completed-run summary.
 * Episode list and episode metrics.
 * Selected device and compositor trajectories.
 * Evidence and match-quality indicators.
 * Provenance inspection where useful.
+* Explicit missing-value and trajectory-gap visualization.
 
 Pause and clear controls remain product requirements, but are not part of this
-initial read-only slice unless explicitly added later.
+read-only slice.
 
 Avoid normative language such as:
 
@@ -1353,11 +1403,12 @@ The implementation is organized as product slices rather than a short sprint:
 * Shipped foundation: libinput capture, SQLite raw evidence, Hyprland context,
   timestamp correlation, movement episodes, foundational metrics, and
   trajectory points.
-* Next: read-only inspection UI over runs, episodes, metrics, trajectories,
-  evidence quality, and provenance.
-* Later descriptive measurement: sessions and summaries, monitor-aware spatial
-  products, click/targeting features, scroll features, and collector-transform
-  aggregate metrics.
+* Shipped Slice 6: read-only inspection UI over runs, episodes, metrics,
+  trajectories, correlation status, and provenance.
+* Next Slice 7: query-time sessions and descriptive summaries.
+* Later descriptive measurement: monitor-aware spatial products,
+  click/targeting features, scroll features, and collector-transform aggregate
+  metrics.
 * Later higher-level features: interaction-pattern detection, passive guidance,
   accessibility/motor-friction observations, and user-approved adaptive
   assistance.
@@ -1410,13 +1461,18 @@ The deterministic collector tests cover correlation statuses, episode
 segmentation, foundational metrics, trajectory ordinals/provenance, duplicate
 contexts, missing device/context observations, and re-derivation.
 
+## Shipped inspection UI
+
+* A read-only Qt Quick UI inspects the latest completed run, episodes, metrics,
+  trajectories, correlation status, and provenance.
+* The UI preserves unavailable values and displays gaps without interpolation.
+
 ## Planned acceptance
 
 The following are roadmap criteria, not current implementation claims:
 
-* A read-only UI can inspect recent runs, episodes, metrics, trajectories,
-  evidence quality, and provenance.
-* Sessions and summaries are defined.
+* Slice 7 sessions and descriptive summaries are implemented with the defined
+  completed-run, query-time semantics.
 * Spatial products, click features, scroll features, and collector-transform
   aggregates are derived with documented evidence semantics.
 * Pause and clear controls are implemented.
@@ -1444,7 +1500,9 @@ These are planned follow-ups, not failures of the shipped foundation:
 * Collector-transform aggregate analysis is still pending.
 * Click, double-click, and drag semantics are not yet derived.
 * Scroll remains raw evidence only.
-* Sessions are not yet defined beyond collector runs.
+* Cross-run and manual session grouping remains undefined and deferred; the
+  initial session unit is one completed collector run as a query-time
+  projection.
 * Pause and clear controls are not yet implemented.
 
 ---
@@ -1517,9 +1575,12 @@ The shipped checkpoint lets a user:
 4. Preserve unaccelerated and collector-accelerated motion separately.
 5. Query movement episodes and foundational metrics from SQLite.
 6. Query device and compositor trajectory points with provenance.
+7. Launch the read-only Qt Quick inspector to inspect the latest completed run,
+   episodes, metrics, trajectories, correlation status, and provenance.
 
-The next UI checkpoint should allow read-only inspection of those existing
-products. Later work may provide sessions, normalized spatial products, click
+The next checkpoint should provide query-time sessions and descriptive
+summaries, with one completed collector run as one session. Later work may
+provide cross-run/manual session grouping, normalized spatial products, click
 and scroll features, adaptive assistance, and optional behavioral-security
 research. None of those claims are part of the shipped foundation.
 
