@@ -169,17 +169,73 @@ ApplicationWindow {
 
             Panel {
                 Layout.fillWidth: true
+                implicitHeight: sessionSelectorColumn.implicitHeight + 28
+                ColumnLayout {
+                    id: sessionSelectorColumn
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 8
+                    Text { text: "Recent sessions"; color: "#f0f4f7"; font.pixelSize: 16; font.bold: true }
+                    Text {
+                        visible: inspection.sessions.length === 0
+                        text: inspection.errorMessage !== "" ? inspection.errorMessage : inspection.emptyMessage
+                        color: inspection.errorMessage !== "" ? "#e28b83" : "#8b9aa8"
+                    }
+                    Rectangle {
+                        visible: inspection.sessions.length > 0
+                        Layout.fillWidth: true
+                        implicitHeight: Math.min(190, Math.max(38, sessionList.contentHeight))
+                        color: "#11171e"
+                        border.color: "#27333f"
+                        ListView {
+                            id: sessionList
+                            anchors.fill: parent
+                            clip: true
+                            model: inspection.sessions
+                            spacing: 1
+                            delegate: Rectangle {
+                                required property var modelData
+                                required property int index
+                                width: sessionList.width
+                                height: 36
+                                color: index === inspection.selectedSessionIndex ? "#23424d" :
+                                       (index % 2 === 0 ? "#1a2129" : "#171c23")
+                                border.color: index === inspection.selectedSessionIndex ? "#65c7d7" : "#26313c"
+                                Row {
+                                    anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 8; spacing: 18
+                                    Text { text: "Session " + modelData.sessionId; color: "#75d0d6"; width: 105; verticalAlignment: Text.AlignVCenter; height: parent.height }
+                                    Text { text: modelData.startText; color: "#b5c1cc"; width: 205; verticalAlignment: Text.AlignVCenter; height: parent.height }
+                                    Text { text: modelData.durationText; color: "#b5c1cc"; width: 95; verticalAlignment: Text.AlignVCenter; height: parent.height }
+                                    Text { text: "MOTION " + modelData.rawMotionCount; color: "#b5c1cc"; width: 105; verticalAlignment: Text.AlignVCenter; height: parent.height }
+                                    Text { text: "EPISODES " + modelData.episodeCount; color: "#b5c1cc"; width: 110; verticalAlignment: Text.AlignVCenter; height: parent.height }
+                                }
+                                MouseArea { anchors.fill: parent; onClicked: inspection.selectSession(index) }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Panel {
+                Layout.fillWidth: true
                 implicitHeight: summaryColumn.implicitHeight + 28
                 ColumnLayout {
                     id: summaryColumn
                     anchors.fill: parent
                     anchors.margins: 14
                     spacing: 8
-                    Text { text: "Latest completed run"; color: "#f0f4f7"; font.pixelSize: 16; font.bold: true }
+                    Text { text: "Selected session"; color: "#f0f4f7"; font.pixelSize: 16; font.bold: true }
                     Text {
                         visible: !inspection.hasRun
                         text: inspection.errorMessage !== "" ? inspection.errorMessage : inspection.emptyMessage
                         color: inspection.errorMessage !== "" ? "#e28b83" : "#8b9aa8"
+                    }
+                    Flow {
+                        visible: inspection.hasRun
+                        Layout.fillWidth: true
+                        spacing: 18
+                        Text { text: "Session " + valueOrDash(inspection.selectedSession.sessionId); color: "#75d0d6"; font.pixelSize: 15; font.bold: true }
+                        Text { text: "Collector run " + valueOrDash(inspection.selectedSession.runId); color: "#cbd6df"; font.pixelSize: 15 }
                     }
                     GridLayout {
                         visible: inspection.hasRun
@@ -187,17 +243,97 @@ ApplicationWindow {
                         columnSpacing: 24
                         rowSpacing: 7
                         Layout.fillWidth: true
-                        Metric { label: "Run id"; value: inspection.runSummary.runId }
-                        Metric { label: "Start"; value: inspection.runSummary.startText }
-                        Metric { label: "End"; value: inspection.runSummary.endText }
-                        Metric { label: "Duration"; value: inspection.runSummary.durationText }
-                        Metric { label: "Raw MOTION"; value: inspection.runSummary.rawMotionCount }
-                        Metric { label: "Episodes"; value: inspection.runSummary.episodeCount }
-                        Metric { label: "matched"; value: inspection.runSummary.matched }
-                        Metric { label: "unmatched_context_error"; value: inspection.runSummary.unmatchedContextError }
-                        Metric { label: "unmatched_outside_tolerance"; value: inspection.runSummary.unmatchedOutsideTolerance }
-                        Metric { label: "unmatched_no_context"; value: inspection.runSummary.unmatchedNoContext }
+                        Metric { label: "Run id"; value: inspection.selectedSession.runId }
+                        Metric { label: "Start"; value: inspection.selectedSession.startText }
+                        Metric { label: "End"; value: inspection.selectedSession.endText }
+                        Metric { label: "Duration"; value: inspection.selectedSession.durationText }
+                        Metric { label: "Raw MOTION"; value: inspection.selectedSession.rawMotionCount }
+                        Metric { label: "Episodes"; value: inspection.selectedSession.episodeCount }
+                        Metric { label: "matched"; value: inspection.selectedSession.matched }
+                        Metric { label: "unmatched_context_error"; value: inspection.selectedSession.unmatchedContextError }
+                        Metric { label: "unmatched_outside_tolerance"; value: inspection.selectedSession.unmatchedOutsideTolerance }
+                        Metric { label: "unmatched_no_context"; value: inspection.selectedSession.unmatchedNoContext }
                     }
+                    Flow {
+                        visible: inspection.hasRun
+                        Layout.fillWidth: true
+                        spacing: 18
+                        Text { text: "device_metric_status"; color: "#81909f"; font.pixelSize: 12 }
+                        Repeater {
+                            model: inspection.selectedSession.deviceMetricStatusCounts
+                            delegate: Text { required property var modelData; text: modelData.status + ": " + modelData.count; color: "#9bb4bf"; font.pixelSize: 12 }
+                        }
+                        Text { text: "compositor_metric_status"; color: "#81909f"; font.pixelSize: 12; Layout.leftMargin: 10 }
+                        Repeater {
+                            model: inspection.selectedSession.compositorMetricStatusCounts
+                            delegate: Text { required property var modelData; text: modelData.status + ": " + modelData.count; color: "#9bb4bf"; font.pixelSize: 12 }
+                        }
+                    }
+                }
+            }
+
+            Panel {
+                Layout.fillWidth: true
+                implicitHeight: deviceColumn.implicitHeight + 28
+                ColumnLayout {
+                    id: deviceColumn
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 8
+                    Text { text: "Devices in selected session"; color: "#f0f4f7"; font.pixelSize: 16; font.bold: true }
+                    Text {
+                        visible: inspection.hasRun && inspection.selectedSessionDevices.length === 0
+                        text: "No device evidence is available for this session."
+                        color: "#8b9aa8"
+                    }
+                    Rectangle {
+                        visible: inspection.selectedSessionDevices.length > 0
+                        Layout.fillWidth: true
+                        implicitHeight: Math.min(180, Math.max(38, deviceList.contentHeight + 25))
+                        color: "#11171e"
+                        border.color: "#27333f"
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 0
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 25
+                                color: "#202934"
+                                Row {
+                                    anchors.fill: parent; anchors.leftMargin: 8; spacing: 0
+                                    Repeater {
+                                        model: ["DEVICE", "MOTION", "EPISODES", "DEVICE-SPACE PATH SUM", "DEVICE PATH A/U", "COMPOSITOR-SPACE PATH SUM", "COMP PATH A/U"]
+                                        Text { required property string modelData; required property int index; width: [180,80,85,180,110,210,110][index]; text: modelData; color: "#71808e"; font.pixelSize: 10; font.bold: true; height: parent.height; verticalAlignment: Text.AlignVCenter }
+                                    }
+                                }
+                            }
+                            ListView {
+                                id: deviceList
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                model: inspection.selectedSessionDevices
+                                spacing: 1
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    required property int index
+                                    width: deviceList.width; height: 34
+                                    color: index % 2 === 0 ? "#1a2129" : "#171c23"
+                                    Row {
+                                        anchors.fill: parent; anchors.leftMargin: 8; spacing: 0
+                                        Text { width: 180; text: modelData.deviceName + " (" + modelData.deviceId + ")"; color: "#dce5ec"; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter; height: parent.height }
+                                        Text { width: 80; text: modelData.rawMotionCount; color: "#b5c1cc"; verticalAlignment: Text.AlignVCenter; height: parent.height }
+                                        Text { width: 85; text: modelData.episodeCount; color: "#b5c1cc"; verticalAlignment: Text.AlignVCenter; height: parent.height }
+                                        Text { width: 180; text: modelData.devicePathSum; color: "#b5c1cc"; verticalAlignment: Text.AlignVCenter; height: parent.height }
+                                        Text { width: 110; text: modelData.devicePathAvailableCount + " / " + modelData.devicePathUnavailableCount; color: "#9bb4bf"; verticalAlignment: Text.AlignVCenter; height: parent.height }
+                                        Text { width: 210; text: modelData.compositorPathSum; color: "#b5c1cc"; verticalAlignment: Text.AlignVCenter; height: parent.height }
+                                        Text { width: 110; text: modelData.compositorPathAvailableCount + " / " + modelData.compositorPathUnavailableCount; color: "#9bb4bf"; verticalAlignment: Text.AlignVCenter; height: parent.height }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Text { visible: inspection.selectedSessionDevices.length > 0; text: "A/U = available / unavailable path values; sums are not physical distance."; color: "#71808e"; font.pixelSize: 11 }
                 }
             }
 
@@ -207,7 +343,13 @@ ApplicationWindow {
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 14; spacing: 8
                     Text { text: "Movement episodes"; color: "#f0f4f7"; font.pixelSize: 16; font.bold: true }
+                    Text {
+                        visible: inspection.hasRun && inspection.episodes.length === 0
+                        text: "No movement episodes are available for the selected session."
+                        color: "#8b9aa8"
+                    }
                     Rectangle {
+                        visible: inspection.episodes.length > 0
                         Layout.fillWidth: true; height: 24; color: "#202934"
                         Row {
                             anchors.fill: parent; anchors.leftMargin: 8; spacing: 0
@@ -218,6 +360,7 @@ ApplicationWindow {
                         }
                     }
                     ScrollView {
+                        visible: inspection.episodes.length > 0
                         Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                         contentWidth: 1420
                         ListView {
@@ -260,8 +403,14 @@ ApplicationWindow {
                 implicitHeight: 360
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 14; spacing: 8
-                    Text { text: inspection.selectedEpisode.episodeId !== undefined ? "Selected episode " + inspection.selectedEpisode.episodeId : "Selected episode"; color: "#f0f4f7"; font.pixelSize: 16; font.bold: true }
+                    Text { text: inspection.selectedEpisode.episodeId !== undefined ? "Selected episode " + inspection.selectedEpisode.episodeId : "No episode selected"; color: "#f0f4f7"; font.pixelSize: 16; font.bold: true }
+                    Text {
+                        visible: inspection.selectedEpisode.episodeId === undefined
+                        text: "Select a session with movement episodes to inspect trajectory details."
+                        color: "#8b9aa8"
+                    }
                     Flow {
+                        visible: inspection.selectedEpisode.episodeId !== undefined
                         Layout.fillWidth: true
                         spacing: 18
                         Text { text: "Device: " + valueOrDash(inspection.selectedEpisode.device); color: "#b5c1cc" }
@@ -272,6 +421,7 @@ ApplicationWindow {
                         Text { text: "Compositor status: " + valueOrDash(inspection.selectedEpisode.compositorStatus); color: "#9bb4bf" }
                     }
                     RowLayout {
+                        visible: inspection.selectedEpisode.episodeId !== undefined
                         Layout.fillWidth: true; Layout.fillHeight: true; spacing: 12
                         TrajectoryPlot { points: inspection.trajectoryPoints; xRole: "deviceX"; yRole: "deviceY"; title: "Device trajectory — cumulative unaccelerated libinput units"; strokeColor: "#65c7d7" }
                         TrajectoryPlot { points: inspection.trajectoryPoints; xRole: "compositorX"; yRole: "compositorY"; title: "Compositor trajectory — Hyprland screen-space coordinates"; strokeColor: "#d6a85f" }
@@ -285,7 +435,13 @@ ApplicationWindow {
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 14; spacing: 8
                     Text { text: "Trajectory provenance"; color: "#f0f4f7"; font.pixelSize: 16; font.bold: true }
+                    Text {
+                        visible: inspection.trajectoryPoints.length === 0
+                        text: "No trajectory provenance is available for the selected episode."
+                        color: "#8b9aa8"
+                    }
                     ScrollView {
+                        visible: inspection.trajectoryPoints.length > 0
                         Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                         ListView {
                             id: provenanceList

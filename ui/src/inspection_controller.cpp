@@ -24,10 +24,15 @@ InspectionController::InspectionController(QObject* parent) : QObject(parent) {}
 
 void InspectionController::load(const QString& databasePath) {
   repository_.reset();
+  session_records_.clear();
   episode_records_.clear();
   has_run_ = false;
   error_message_.clear();
   empty_message_.clear();
+  sessions_.clear();
+  selected_session_.clear();
+  selected_session_index_ = -1;
+  selected_session_devices_.clear();
   run_summary_.clear();
   episodes_.clear();
   selected_episode_index_ = -1;
@@ -41,64 +46,65 @@ void InspectionController::load(const QString& databasePath) {
     return;
   }
 
-  const auto latest = repository_->latest_completed_run(error);
+  session_records_ = repository_->completed_sessions(error);
   if (!error.empty()) {
     setError(QString::fromStdString(error));
     return;
   }
-  if (!latest) {
-    empty_message_ = QStringLiteral("No completed run is available.");
+  for (const SessionSummary& session : session_records_) {
+    sessions_.append(session_map(session));
+  }
+  if (session_records_.empty()) {
+    empty_message_ = QStringLiteral("No completed session is available.");
     emit stateChanged();
     return;
   }
 
-  has_run_ = true;
-  run_summary_.insert(QStringLiteral("runId"), QVariant::fromValue<qlonglong>(latest->run_id));
-  run_summary_.insert(QStringLiteral("startText"),
-                      QDateTime::fromMSecsSinceEpoch(latest->started_wallclock_us / 1000)
-                          .toString(Qt::ISODateWithMs));
-  run_summary_.insert(
-      QStringLiteral("endText"),
-      latest->ended_wallclock_us
-          ? QDateTime::fromMSecsSinceEpoch(*latest->ended_wallclock_us / 1000)
-                .toString(Qt::ISODateWithMs)
-          : QStringLiteral("-"));
-  run_summary_.insert(QStringLiteral("durationText"),
-                      latest->display_duration_us
-                          ? duration_text(*latest->display_duration_us)
-                          : QStringLiteral("-"));
-  run_summary_.insert(QStringLiteral("rawMotionCount"),
-                      QVariant::fromValue<qlonglong>(latest->raw_motion_count));
-  run_summary_.insert(QStringLiteral("episodeCount"),
-                      QVariant::fromValue<qlonglong>(latest->movement_episode_count));
-  run_summary_.insert(QStringLiteral("matched"),
-                      QVariant::fromValue<qlonglong>(latest->correlation_counts.matched));
-  run_summary_.insert(
-      QStringLiteral("unmatchedContextError"),
-      QVariant::fromValue<qlonglong>(latest->correlation_counts.unmatched_context_error));
-  run_summary_.insert(
-      QStringLiteral("unmatchedOutsideTolerance"),
-      QVariant::fromValue<qlonglong>(latest->correlation_counts.unmatched_outside_tolerance));
-  run_summary_.insert(
-      QStringLiteral("unmatchedNoContext"),
-      QVariant::fromValue<qlonglong>(latest->correlation_counts.unmatched_no_context));
+  if (loadSelectedSession(0)) emit stateChanged();
+}
 
-  episode_records_ = repository_->episodes_for_run(latest->run_id, error);
+void InspectionController::selectSession(int index) {
+  if (!repository_ || index < 0 || index >= static_cast<int>(session_records_.size())) return;
+  if (loadSelectedSession(index)) emit stateChanged();
+}
+
+bool InspectionController::loadSelectedSession(int index) {
+  clearActiveState();
+  error_message_.clear();
+  selected_session_index_ = index;
+  const SessionSummary& session = session_records_[static_cast<std::size_t>(index)];
+  selected_session_ = session_map(session);
+  run_summary_ = selected_session_;
+  has_run_ = true;
+
+  std::string error;
+  const auto devices = repository_->device_summaries_for_session(session.session_id, error);
   if (!error.empty()) {
     setError(QString::fromStdString(error));
-    return;
+    return false;
+  }
+  for (const DeviceSessionSummary& device : devices) {
+    selected_session_devices_.append(device_session_map(device));
+  }
+
+  episode_records_ = repository_->episodes_for_run(session.run_id, error);
+  if (!error.empty()) {
+    setError(QString::fromStdString(error));
+    return false;
   }
   for (const EpisodeSummary& episode : episode_records_) {
     episodes_.append(episode_map(episode));
   }
   if (episode_records_.empty()) {
-    empty_message_ = QStringLiteral("The latest completed run has no movement episodes.");
-  } else {
-    selected_episode_index_ = 0;
-    selected_episode_ = episode_map(episode_records_.front());
-    loadTrajectory(episode_records_.front().episode_id);
+    empty_message_ = QStringLiteral("The selected session has no movement episodes.");
+    return true;
   }
-  emit stateChanged();
+
+  empty_message_.clear();
+  selected_episode_index_ = 0;
+  selected_episode_ = episode_map(episode_records_.front());
+  loadTrajectory(episode_records_.front().episode_id);
+  return has_run_;
 }
 
 void InspectionController::selectEpisode(int index) {
@@ -120,6 +126,75 @@ void InspectionController::loadTrajectory(std::int64_t episode_id) {
   for (const TrajectoryPoint& point : points) {
     trajectory_points_.append(trajectory_map(point));
   }
+}
+
+QVariantList InspectionController::status_counts_map(const std::vector<StatusCount>& counts) {
+  QVariantList result;
+  for (const StatusCount& status : counts) {
+    QVariantMap item;
+    item.insert(QStringLiteral("status"), QString::fromStdString(status.status));
+    item.insert(QStringLiteral("count"), QVariant::fromValue<qlonglong>(status.count));
+    result.append(item);
+  }
+  return result;
+}
+
+QVariantMap InspectionController::session_map(const SessionSummary& session) {
+  QVariantMap result;
+  result.insert(QStringLiteral("sessionId"), QVariant::fromValue<qlonglong>(session.session_id));
+  result.insert(QStringLiteral("runId"), QVariant::fromValue<qlonglong>(session.run_id));
+  result.insert(QStringLiteral("startText"),
+                QDateTime::fromMSecsSinceEpoch(session.started_wallclock_us / 1000)
+                    .toString(Qt::ISODateWithMs));
+  result.insert(QStringLiteral("endText"),
+                session.ended_wallclock_us
+                    ? QDateTime::fromMSecsSinceEpoch(*session.ended_wallclock_us / 1000)
+                          .toString(Qt::ISODateWithMs)
+                    : QStringLiteral("-"));
+  result.insert(QStringLiteral("durationText"),
+                session.display_duration_us ? duration_text(*session.display_duration_us)
+                                            : QStringLiteral("-"));
+  result.insert(QStringLiteral("rawMotionCount"),
+                QVariant::fromValue<qlonglong>(session.raw_motion_count));
+  result.insert(QStringLiteral("episodeCount"),
+                QVariant::fromValue<qlonglong>(session.movement_episode_count));
+  result.insert(QStringLiteral("matched"),
+                QVariant::fromValue<qlonglong>(session.correlation_counts.matched));
+  result.insert(QStringLiteral("unmatchedContextError"),
+                QVariant::fromValue<qlonglong>(session.correlation_counts.unmatched_context_error));
+  result.insert(QStringLiteral("unmatchedOutsideTolerance"),
+                QVariant::fromValue<qlonglong>(session.correlation_counts.unmatched_outside_tolerance));
+  result.insert(QStringLiteral("unmatchedNoContext"),
+                QVariant::fromValue<qlonglong>(session.correlation_counts.unmatched_no_context));
+  result.insert(QStringLiteral("deviceMetricStatusCounts"),
+                status_counts_map(session.device_metric_status_counts));
+  result.insert(QStringLiteral("compositorMetricStatusCounts"),
+                status_counts_map(session.compositor_metric_status_counts));
+  return result;
+}
+
+QVariantMap InspectionController::device_session_map(const DeviceSessionSummary& device) {
+  QVariantMap result;
+  result.insert(QStringLiteral("deviceId"), QString::fromStdString(device.device_id));
+  result.insert(QStringLiteral("deviceName"),
+                device.device_name ? QString::fromStdString(*device.device_name)
+                                    : QString::fromStdString(device.device_id));
+  result.insert(QStringLiteral("rawMotionCount"),
+                QVariant::fromValue<qlonglong>(device.raw_motion_count));
+  result.insert(QStringLiteral("episodeCount"),
+                QVariant::fromValue<qlonglong>(device.episode_count));
+  result.insert(QStringLiteral("devicePathSum"), optional_number_text(device.device_path_distance_sum));
+  result.insert(QStringLiteral("devicePathAvailableCount"),
+                QVariant::fromValue<qlonglong>(device.device_path_distance_available_count));
+  result.insert(QStringLiteral("devicePathUnavailableCount"),
+                QVariant::fromValue<qlonglong>(device.device_path_distance_unavailable_count));
+  result.insert(QStringLiteral("compositorPathSum"),
+                optional_number_text(device.compositor_path_distance_sum));
+  result.insert(QStringLiteral("compositorPathAvailableCount"),
+                QVariant::fromValue<qlonglong>(device.compositor_path_distance_available_count));
+  result.insert(QStringLiteral("compositorPathUnavailableCount"),
+                QVariant::fromValue<qlonglong>(device.compositor_path_distance_unavailable_count));
+  return result;
 }
 
 QVariantMap InspectionController::episode_map(const EpisodeSummary& episode) {
@@ -201,7 +276,22 @@ QString InspectionController::optional_integer_text(const std::optional<std::int
 }
 
 void InspectionController::setError(const QString& message) {
+  clearActiveState();
   has_run_ = false;
   error_message_ = message;
   emit stateChanged();
+}
+
+void InspectionController::clearActiveState() {
+  has_run_ = false;
+  selected_session_.clear();
+  selected_session_index_ = -1;
+  selected_session_devices_.clear();
+  run_summary_.clear();
+  episode_records_.clear();
+  episodes_.clear();
+  selected_episode_index_ = -1;
+  selected_episode_.clear();
+  trajectory_points_.clear();
+  empty_message_.clear();
 }
