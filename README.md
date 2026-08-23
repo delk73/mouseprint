@@ -1,10 +1,11 @@
 # Mouseprint
 
 Mouseprint is a local pointing-device observatory for Omarchy/Hyprland. The
-current implementation is Slice 5: native libinput evidence capture with
-separate Hyprland compositor context and local SQLite persistence.
+current implementation is Slice 6: native libinput evidence capture with
+separate Hyprland compositor context, local SQLite persistence, and a read-only
+Qt Quick inspection UI.
 
-## Slice 5
+## Shipped foundation: Slices 1-5
 
 The collector creates a non-exclusive libinput udev context on `seat0` and
 reports pointer-capable device lifecycle events, motion, buttons, and scroll
@@ -57,6 +58,30 @@ compositor observations are not interpolated, and repeated context IDs do not
 create artificial movement. Monitor-normalized coordinates are not produced;
 monitor geometry is not currently retained as evidence and is a follow-up
 design finding.
+
+## Slice 6
+
+The read-only inspector uses the existing `QueryRepository` with
+`SQLITE_OPEN_READONLY` and `PRAGMA query_only=ON`. It shows the latest completed
+collector run, episode metrics, separate device/compositor trajectories,
+provenance, correlation statuses, and explicit unavailable values or trajectory
+gaps. It does not modify the collector database or derive metrics in QML.
+
+Build it with:
+
+```sh
+make -C ui
+```
+
+Launch it with an explicit database:
+
+```sh
+./build/mouseprint-inspector --database PATH
+```
+
+The inspector reads the latest completed run read-only. Sessions and
+descriptive summaries are the next implementation area; the initial planned
+session is one completed collector run projected at query time.
 
 ## Build
 
