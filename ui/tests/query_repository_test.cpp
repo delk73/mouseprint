@@ -93,11 +93,12 @@ int main(int argc, char** argv) {
 
   const auto runs = repository->completed_runs(error);
   assert(error.empty());
-  assert(runs.size() == 4);
+  assert(runs.size() == 5);
   assert(runs[0].run_id == 5);
   assert(runs[1].run_id == 4);
   assert(runs[2].run_id == 2);
   assert(runs[3].run_id == 1);
+  assert(runs[4].run_id == 0);
   assert(runs[2].ended_wallclock_us && *runs[2].ended_wallclock_us == 9000000);
   assert(runs[2].display_duration_us && *runs[2].display_duration_us == 5000000);
   assert(runs[2].raw_motion_count == 1);
@@ -117,21 +118,39 @@ int main(int argc, char** argv) {
 
   const auto sessions = repository->completed_sessions(error);
   assert(error.empty());
-  assert(sessions.size() == 4);
+  assert(sessions.size() == 5);
   assert(sessions[0].session_id == 5 && sessions[0].run_id == 5);
   assert(sessions[1].session_id == 4 && sessions[1].run_id == 4);
   assert(sessions[2].session_id == 2 && sessions[3].session_id == 1);
+  assert(sessions[4].session_id == 0 && sessions[4].run_id == 0);
   assert(sessions[0].ended_wallclock_us && *sessions[0].ended_wallclock_us == 14000000);
   assert(sessions[0].display_duration_us && *sessions[0].display_duration_us == 1000000);
   assert(sessions[0].raw_motion_count == 0);
   assert(sessions[0].movement_episode_count == 0);
+  assert(!sessions[0].compositor_path_distance_sum);
+  assert(sessions[0].compositor_path_distance_available_count == 0);
+  assert(sessions[0].compositor_path_distance_unavailable_count == 0);
+  assert(!sessions[0].directional_reversal_total);
+  assert(sessions[0].directional_reversal_available_count == 0);
+  assert(sessions[0].directional_reversal_unavailable_count == 0);
   assert(sessions[1].raw_motion_count == 1);
   assert(sessions[1].movement_episode_count == 0);
+  assert(!sessions[1].compositor_path_distance_sum);
+  assert(sessions[1].compositor_path_distance_available_count == 0);
+  assert(sessions[1].compositor_path_distance_unavailable_count == 0);
   assert(sessions[2].correlation_counts.matched == 1);
   assert(sessions[3].correlation_counts.matched == 4);
   assert(sessions[3].correlation_counts.unmatched_context_error == 2);
   assert(sessions[3].correlation_counts.unmatched_outside_tolerance == 1);
   assert(sessions[3].correlation_counts.unmatched_no_context == 1);
+  assert(sessions[3].compositor_path_distance_sum &&
+         *sessions[3].compositor_path_distance_sum == 2.0);
+  assert(sessions[3].compositor_path_distance_available_count == 1);
+  assert(sessions[3].compositor_path_distance_unavailable_count == 1);
+  assert(sessions[3].directional_reversal_total &&
+         *sessions[3].directional_reversal_total == 0);
+  assert(sessions[3].directional_reversal_available_count == 1);
+  assert(sessions[3].directional_reversal_unavailable_count == 1);
   assert(sessions[3].device_metric_status_counts.size() == 2);
   assert(sessions[3].device_metric_status_counts[0].status == "available");
   assert(sessions[3].device_metric_status_counts[0].count == 1);
@@ -185,6 +204,22 @@ int main(int argc, char** argv) {
          *zero_path_device[0].compositor_path_distance_sum == 0.0);
   assert(zero_path_device[0].compositor_path_distance_available_count == 1);
   assert(zero_path_device[0].compositor_path_distance_unavailable_count == 0);
+  assert(sessions[2].compositor_path_distance_sum &&
+         *sessions[2].compositor_path_distance_sum == 0.0);
+  assert(sessions[2].compositor_path_distance_available_count == 1);
+  assert(sessions[2].compositor_path_distance_unavailable_count == 0);
+  assert(sessions[2].directional_reversal_total &&
+         *sessions[2].directional_reversal_total == 0);
+  assert(sessions[2].directional_reversal_available_count == 1);
+  assert(sessions[2].directional_reversal_unavailable_count == 0);
+
+  assert(sessions[4].movement_episode_count == 1);
+  assert(!sessions[4].compositor_path_distance_sum);
+  assert(sessions[4].compositor_path_distance_available_count == 0);
+  assert(sessions[4].compositor_path_distance_unavailable_count == 1);
+  assert(!sessions[4].directional_reversal_total);
+  assert(sessions[4].directional_reversal_available_count == 0);
+  assert(sessions[4].directional_reversal_unavailable_count == 1);
 
   const auto raw_only_device = repository->device_summaries_for_session(4, error);
   assert(error.empty());
@@ -311,8 +346,8 @@ int main(int argc, char** argv) {
       "WHERE episode_id=12 AND ordinal=2");
   assert(compositor_value_before == 110.0);
   error.clear();
-  assert(repository->completed_runs(error).size() == 4);
-  assert(repository->completed_sessions(error).size() == 4);
+  assert(repository->completed_runs(error).size() == 5);
+  assert(repository->completed_sessions(error).size() == 5);
   assert(repository->device_summaries_for_session(1, error).size() == 2);
   assert(repository->episodes_for_run(1, error).size() == 2);
   assert(repository->trajectory_for_episode(11, error).size() == 3);

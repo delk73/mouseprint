@@ -39,6 +39,12 @@ struct SessionSummary {
   CorrelationCounts correlation_counts;
   std::vector<StatusCount> device_metric_status_counts;
   std::vector<StatusCount> compositor_metric_status_counts;
+  std::optional<double> compositor_path_distance_sum;
+  std::int64_t compositor_path_distance_available_count = 0;
+  std::int64_t compositor_path_distance_unavailable_count = 0;
+  std::optional<std::int64_t> directional_reversal_total;
+  std::int64_t directional_reversal_available_count = 0;
+  std::int64_t directional_reversal_unavailable_count = 0;
 };
 
 struct DeviceSessionSummary {

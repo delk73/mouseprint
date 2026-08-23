@@ -170,6 +170,18 @@ QVariantMap InspectionController::session_map(const SessionSummary& session) {
                 status_counts_map(session.device_metric_status_counts));
   result.insert(QStringLiteral("compositorMetricStatusCounts"),
                 status_counts_map(session.compositor_metric_status_counts));
+  result.insert(QStringLiteral("compositorPathSum"),
+                optional_number_text(session.compositor_path_distance_sum));
+  result.insert(QStringLiteral("compositorPathAvailableCount"),
+                QVariant::fromValue<qlonglong>(session.compositor_path_distance_available_count));
+  result.insert(QStringLiteral("compositorPathUnavailableCount"),
+                QVariant::fromValue<qlonglong>(session.compositor_path_distance_unavailable_count));
+  result.insert(QStringLiteral("directionalReversalTotal"),
+                optional_integer_text(session.directional_reversal_total));
+  result.insert(QStringLiteral("directionalReversalAvailableCount"),
+                QVariant::fromValue<qlonglong>(session.directional_reversal_available_count));
+  result.insert(QStringLiteral("directionalReversalUnavailableCount"),
+                QVariant::fromValue<qlonglong>(session.directional_reversal_unavailable_count));
   return result;
 }
 

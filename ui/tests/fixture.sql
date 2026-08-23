@@ -112,6 +112,7 @@ INSERT INTO collector_runs VALUES (2, 4000000, 40, 9000000, 4);
 INSERT INTO collector_runs VALUES (3, 10000000, 100, NULL, 2);
 INSERT INTO collector_runs VALUES (4, 11000000, 110, 12000000, 1);
 INSERT INTO collector_runs VALUES (5, 13000000, 130, 14000000, 0);
+INSERT INTO collector_runs VALUES (0, 0, 0, 500, 1);
 INSERT INTO devices VALUES ('mouse-a', 'Mouse A');
 INSERT INTO devices VALUES ('mouse-b', 'Mouse B');
 INSERT INTO devices VALUES ('mouse-c', 'Mouse C');
@@ -122,7 +123,8 @@ VALUES (101,1,1,100, 'mouse-a','MOTION'), (102,1,2,110,'mouse-a','MOTION'),
        (105,1,5,140,'mouse-b','MOTION'), (106,1,6,150,'mouse-b','MOTION'),
        (107,1,7,160,'mouse-a','BUTTON_DOWN'), (108,1,8,170,'mouse-a','SCROLL'),
        (201,2,1,200,'mouse-a','MOTION'),
-       (401,4,1,400,'mouse-c','MOTION');
+       (401,4,1,400,'mouse-c','MOTION'),
+       (601,0,1,50,'mouse-c','MOTION');
 
 INSERT INTO pointer_context(context_id,run_id,sample_monotonic_us,request_start_us,request_end_us,
   request_latency_us,sample_status,cursor_x,cursor_y)
@@ -146,13 +148,16 @@ VALUES (701,1,101,501,'matched',0,0,25000),
 INSERT INTO movement_episodes VALUES
  (11,1,'mouse-a',100,120,20,100000,'run_end',3,0,'available',3,1,2,0,'available',10,20,12,20,2,2,1,1,1),
  (12,1,'mouse-b',130,150,20,100000,'idle_gap',3,0,'missing_unaccelerated_values',NULL,NULL,NULL,NULL,
-  'context_sampling_failed',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL),
- (21,2,'mouse-a',200,200,0,100000,'run_end',1,0,'available',0,0,0,0,'available',30,40,30,40,0,0,NULL,NULL,NULL);
+   'context_sampling_failed',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL),
+ (21,2,'mouse-a',200,200,0,100000,'run_end',1,0,'available',0,0,0,0,'available',30,40,30,40,0,0,NULL,NULL,NULL),
+ (61,0,'mouse-c',50,50,0,100000,'run_end',1,0,'missing_unaccelerated_values',NULL,NULL,NULL,NULL,
+  'context_sampling_failed',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
 
 INSERT INTO movement_episode_members VALUES
  (11,0,101,701,'motion'), (11,1,102,702,'motion'), (11,2,103,703,'motion'),
  (12,0,104,704,'motion'), (12,1,105,705,'motion'), (12,2,106,706,'motion'),
- (21,0,201,801,'motion');
+ (21,0,201,801,'motion'),
+ (61,0,601,NULL,'motion');
 
 INSERT INTO movement_episode_trajectory_points VALUES
  (11,0,101,701,100,1,0,1,0,0,501,100,10,20,0),
