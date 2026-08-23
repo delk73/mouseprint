@@ -114,6 +114,116 @@ std::vector<CompletedRunSummary> QueryRepository::completed_runs(std::string& er
   return result;
 }
 
+std::vector<SessionSummary> QueryRepository::completed_sessions(std::string& error) const {
+  error.clear();
+  const auto runs = completed_runs(error);
+  std::vector<SessionSummary> result;
+  if (!error.empty()) return result;
+
+  const char* sql =
+      "SELECT device_metric_status, count(*) FROM movement_episodes "
+      "WHERE run_id=? AND device_metric_status IS NOT NULL "
+      "GROUP BY device_metric_status ORDER BY device_metric_status";
+  const char* compositor_sql =
+      "SELECT compositor_metric_status, count(*) FROM movement_episodes "
+      "WHERE run_id=? AND compositor_metric_status IS NOT NULL "
+      "GROUP BY compositor_metric_status ORDER BY compositor_metric_status";
+
+  auto status_counts = [&](std::int64_t run_id, const char* query,
+                           std::vector<StatusCount>& counts) -> bool {
+    sqlite3_stmt* statement = nullptr;
+    if (!prepare(database_, query, statement, error) ||
+        !bind_id(statement, 1, run_id, error, database_)) {
+      sqlite3_finalize(statement);
+      return false;
+    }
+    int status = SQLITE_OK;
+    while ((status = sqlite3_step(statement)) == SQLITE_ROW) {
+      counts.push_back({required_text(statement, 0), sqlite3_column_int64(statement, 1)});
+    }
+    if (status != SQLITE_DONE) error = sqlite_error(database_, "could not read session status counts");
+    sqlite3_finalize(statement);
+    return error.empty();
+  };
+
+  result.reserve(runs.size());
+  for (const auto& run : runs) {
+    SessionSummary session;
+    session.session_id = run.run_id;
+    session.run_id = run.run_id;
+    session.started_wallclock_us = run.started_wallclock_us;
+    session.ended_wallclock_us = run.ended_wallclock_us;
+    session.display_duration_us = run.display_duration_us;
+    session.raw_motion_count = run.raw_motion_count;
+    session.movement_episode_count = run.movement_episode_count;
+    session.correlation_counts = run.correlation_counts;
+    if (!status_counts(run.run_id, sql, session.device_metric_status_counts) ||
+        !status_counts(run.run_id, compositor_sql, session.compositor_metric_status_counts)) {
+      return {};
+    }
+    result.push_back(std::move(session));
+  }
+  return result;
+}
+
+std::optional<SessionSummary> QueryRepository::latest_session(std::string& error) const {
+  const auto sessions = completed_sessions(error);
+  if (!error.empty() || sessions.empty()) return std::nullopt;
+  return sessions.front();
+}
+
+std::vector<DeviceSessionSummary> QueryRepository::device_summaries_for_session(
+    std::int64_t session_id, std::string& error) const {
+  error.clear();
+  std::vector<DeviceSessionSummary> result;
+  // Membership is the run-scoped raw/episode evidence union: it avoids unrelated
+  // global devices and retains raw-only devices without derived episodes.
+  const char* sql =
+      "WITH completed_session AS ("
+      "SELECT run_id FROM collector_runs WHERE run_id=? AND ended_wallclock_us IS NOT NULL"
+      "), device_ids AS ("
+      "SELECT DISTINCT device_id FROM raw_input_events "
+      "WHERE run_id=(SELECT run_id FROM completed_session) "
+      "UNION SELECT DISTINCT device_id FROM movement_episodes "
+      "WHERE run_id=(SELECT run_id FROM completed_session)"
+      ") "
+      "SELECT ids.device_id, d.device_name, "
+      "(SELECT count(*) FROM raw_input_events e WHERE e.run_id=(SELECT run_id FROM completed_session) AND e.device_id=ids.device_id AND e.event_type='MOTION'), "
+      "(SELECT count(*) FROM movement_episodes e WHERE e.run_id=(SELECT run_id FROM completed_session) AND e.device_id=ids.device_id), "
+      "(SELECT sum(e.device_path_distance) FROM movement_episodes e WHERE e.run_id=(SELECT run_id FROM completed_session) AND e.device_id=ids.device_id), "
+      "(SELECT count(e.device_path_distance) FROM movement_episodes e WHERE e.run_id=(SELECT run_id FROM completed_session) AND e.device_id=ids.device_id), "
+      "(SELECT count(*) - count(e.device_path_distance) FROM movement_episodes e WHERE e.run_id=(SELECT run_id FROM completed_session) AND e.device_id=ids.device_id), "
+      "(SELECT sum(e.compositor_path_distance) FROM movement_episodes e WHERE e.run_id=(SELECT run_id FROM completed_session) AND e.device_id=ids.device_id), "
+      "(SELECT count(e.compositor_path_distance) FROM movement_episodes e WHERE e.run_id=(SELECT run_id FROM completed_session) AND e.device_id=ids.device_id), "
+      "(SELECT count(*) - count(e.compositor_path_distance) FROM movement_episodes e WHERE e.run_id=(SELECT run_id FROM completed_session) AND e.device_id=ids.device_id) "
+      "FROM device_ids ids LEFT JOIN devices d ON d.device_id=ids.device_id "
+      "ORDER BY ids.device_id";
+  sqlite3_stmt* statement = nullptr;
+  if (!prepare(database_, sql, statement, error)) return result;
+  if (!bind_id(statement, 1, session_id, error, database_)) {
+    sqlite3_finalize(statement);
+    return result;
+  }
+  int status = SQLITE_OK;
+  while ((status = sqlite3_step(statement)) == SQLITE_ROW) {
+    DeviceSessionSummary device;
+    device.device_id = required_text(statement, 0);
+    device.device_name = optional_value<std::string>(statement, 1);
+    device.raw_motion_count = sqlite3_column_int64(statement, 2);
+    device.episode_count = sqlite3_column_int64(statement, 3);
+    device.device_path_distance_sum = optional_value<double>(statement, 4);
+    device.device_path_distance_available_count = sqlite3_column_int64(statement, 5);
+    device.device_path_distance_unavailable_count = sqlite3_column_int64(statement, 6);
+    device.compositor_path_distance_sum = optional_value<double>(statement, 7);
+    device.compositor_path_distance_available_count = sqlite3_column_int64(statement, 8);
+    device.compositor_path_distance_unavailable_count = sqlite3_column_int64(statement, 9);
+    result.push_back(std::move(device));
+  }
+  if (status != SQLITE_DONE) error = sqlite_error(database_, "could not read session device summaries");
+  sqlite3_finalize(statement);
+  return result;
+}
+
 std::optional<CompletedRunSummary> QueryRepository::latest_completed_run(
     std::string& error) const {
   const auto runs = completed_runs(error);

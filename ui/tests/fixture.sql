@@ -110,15 +110,19 @@ CREATE TABLE movement_episode_trajectory_points (
 INSERT INTO collector_runs VALUES (1, 1000000, 10, 3000000, 9);
 INSERT INTO collector_runs VALUES (2, 4000000, 40, 9000000, 4);
 INSERT INTO collector_runs VALUES (3, 10000000, 100, NULL, 2);
+INSERT INTO collector_runs VALUES (4, 11000000, 110, 12000000, 1);
+INSERT INTO collector_runs VALUES (5, 13000000, 130, 14000000, 0);
 INSERT INTO devices VALUES ('mouse-a', 'Mouse A');
 INSERT INTO devices VALUES ('mouse-b', 'Mouse B');
+INSERT INTO devices VALUES ('mouse-c', 'Mouse C');
 
 INSERT INTO raw_input_events(event_id,run_id,receive_sequence,source_time_us,device_id,event_type)
 VALUES (101,1,1,100, 'mouse-a','MOTION'), (102,1,2,110,'mouse-a','MOTION'),
        (103,1,3,120,'mouse-a','MOTION'), (104,1,4,130,'mouse-b','MOTION'),
        (105,1,5,140,'mouse-b','MOTION'), (106,1,6,150,'mouse-b','MOTION'),
        (107,1,7,160,'mouse-a','BUTTON_DOWN'), (108,1,8,170,'mouse-a','SCROLL'),
-       (201,2,1,200,'mouse-a','MOTION');
+       (201,2,1,200,'mouse-a','MOTION'),
+       (401,4,1,400,'mouse-c','MOTION');
 
 INSERT INTO pointer_context(context_id,run_id,sample_monotonic_us,request_start_us,request_end_us,
   request_latency_us,sample_status,cursor_x,cursor_y)

@@ -93,25 +93,115 @@ int main(int argc, char** argv) {
 
   const auto runs = repository->completed_runs(error);
   assert(error.empty());
-  assert(runs.size() == 2);
-  assert(runs[0].run_id == 2);
-  assert(runs[1].run_id == 1);
-  assert(runs[0].ended_wallclock_us && *runs[0].ended_wallclock_us == 9000000);
-  assert(runs[0].display_duration_us && *runs[0].display_duration_us == 5000000);
-  assert(runs[0].raw_motion_count == 1);
-  assert(runs[0].movement_episode_count == 1);
-  assert(runs[0].correlation_counts.matched == 1);
-  assert(runs[0].correlation_counts.unmatched_context_error == 0);
-  assert(runs[0].correlation_counts.unmatched_outside_tolerance == 0);
-  assert(runs[0].correlation_counts.unmatched_no_context == 0);
-  assert(runs[1].correlation_counts.matched == 4);
-  assert(runs[1].correlation_counts.unmatched_context_error == 2);
-  assert(runs[1].correlation_counts.unmatched_outside_tolerance == 1);
-  assert(runs[1].correlation_counts.unmatched_no_context == 1);
+  assert(runs.size() == 4);
+  assert(runs[0].run_id == 5);
+  assert(runs[1].run_id == 4);
+  assert(runs[2].run_id == 2);
+  assert(runs[3].run_id == 1);
+  assert(runs[2].ended_wallclock_us && *runs[2].ended_wallclock_us == 9000000);
+  assert(runs[2].display_duration_us && *runs[2].display_duration_us == 5000000);
+  assert(runs[2].raw_motion_count == 1);
+  assert(runs[2].movement_episode_count == 1);
+  assert(runs[2].correlation_counts.matched == 1);
+  assert(runs[2].correlation_counts.unmatched_context_error == 0);
+  assert(runs[2].correlation_counts.unmatched_outside_tolerance == 0);
+  assert(runs[2].correlation_counts.unmatched_no_context == 0);
+  assert(runs[3].correlation_counts.matched == 4);
+  assert(runs[3].correlation_counts.unmatched_context_error == 2);
+  assert(runs[3].correlation_counts.unmatched_outside_tolerance == 1);
+  assert(runs[3].correlation_counts.unmatched_no_context == 1);
 
   const auto latest = repository->latest_completed_run(error);
   assert(error.empty());
-  assert(latest && latest->run_id == 2);
+  assert(latest && latest->run_id == 5);
+
+  const auto sessions = repository->completed_sessions(error);
+  assert(error.empty());
+  assert(sessions.size() == 4);
+  assert(sessions[0].session_id == 5 && sessions[0].run_id == 5);
+  assert(sessions[1].session_id == 4 && sessions[1].run_id == 4);
+  assert(sessions[2].session_id == 2 && sessions[3].session_id == 1);
+  assert(sessions[0].ended_wallclock_us && *sessions[0].ended_wallclock_us == 14000000);
+  assert(sessions[0].display_duration_us && *sessions[0].display_duration_us == 1000000);
+  assert(sessions[0].raw_motion_count == 0);
+  assert(sessions[0].movement_episode_count == 0);
+  assert(sessions[1].raw_motion_count == 1);
+  assert(sessions[1].movement_episode_count == 0);
+  assert(sessions[2].correlation_counts.matched == 1);
+  assert(sessions[3].correlation_counts.matched == 4);
+  assert(sessions[3].correlation_counts.unmatched_context_error == 2);
+  assert(sessions[3].correlation_counts.unmatched_outside_tolerance == 1);
+  assert(sessions[3].correlation_counts.unmatched_no_context == 1);
+  assert(sessions[3].device_metric_status_counts.size() == 2);
+  assert(sessions[3].device_metric_status_counts[0].status == "available");
+  assert(sessions[3].device_metric_status_counts[0].count == 1);
+  assert(sessions[3].device_metric_status_counts[1].status == "missing_unaccelerated_values");
+  assert(sessions[3].device_metric_status_counts[1].count == 1);
+  assert(sessions[3].compositor_metric_status_counts.size() == 2);
+  assert(sessions[3].compositor_metric_status_counts[0].status == "available");
+  assert(sessions[3].compositor_metric_status_counts[0].count == 1);
+  assert(sessions[3].compositor_metric_status_counts[1].status == "context_sampling_failed");
+  assert(sessions[3].compositor_metric_status_counts[1].count == 1);
+
+  const auto latest_session = repository->latest_session(error);
+  assert(error.empty());
+  assert(latest_session && latest_session->session_id == latest_session->run_id);
+  assert(latest_session->session_id == 5);
+
+  const auto device_summaries = repository->device_summaries_for_session(1, error);
+  assert(error.empty());
+  assert(device_summaries.size() == 2);
+  assert(device_summaries[0].device_id == "mouse-a");
+  assert(device_summaries[0].device_name && *device_summaries[0].device_name == "Mouse A");
+  assert(device_summaries[0].raw_motion_count == 3);
+  assert(device_summaries[0].episode_count == 1);
+  assert(device_summaries[0].device_path_distance_sum &&
+         *device_summaries[0].device_path_distance_sum == 3.0);
+  assert(device_summaries[0].device_path_distance_available_count == 1);
+  assert(device_summaries[0].device_path_distance_unavailable_count == 0);
+  assert(device_summaries[0].compositor_path_distance_sum &&
+         *device_summaries[0].compositor_path_distance_sum == 2.0);
+  assert(device_summaries[0].compositor_path_distance_available_count == 1);
+  assert(device_summaries[0].compositor_path_distance_unavailable_count == 0);
+  assert(device_summaries[1].device_id == "mouse-b");
+  assert(device_summaries[1].raw_motion_count == 3);
+  assert(device_summaries[1].episode_count == 1);
+  assert(!device_summaries[1].device_path_distance_sum);
+  assert(device_summaries[1].device_path_distance_available_count == 0);
+  assert(device_summaries[1].device_path_distance_unavailable_count == 1);
+  assert(!device_summaries[1].compositor_path_distance_sum);
+  assert(device_summaries[1].compositor_path_distance_available_count == 0);
+  assert(device_summaries[1].compositor_path_distance_unavailable_count == 1);
+
+  const auto zero_path_device = repository->device_summaries_for_session(2, error);
+  assert(error.empty());
+  assert(zero_path_device.size() == 1);
+  assert(zero_path_device[0].device_id == "mouse-a");
+  assert(zero_path_device[0].device_path_distance_sum &&
+         *zero_path_device[0].device_path_distance_sum == 0.0);
+  assert(zero_path_device[0].device_path_distance_available_count == 1);
+  assert(zero_path_device[0].device_path_distance_unavailable_count == 0);
+  assert(zero_path_device[0].compositor_path_distance_sum &&
+         *zero_path_device[0].compositor_path_distance_sum == 0.0);
+  assert(zero_path_device[0].compositor_path_distance_available_count == 1);
+  assert(zero_path_device[0].compositor_path_distance_unavailable_count == 0);
+
+  const auto raw_only_device = repository->device_summaries_for_session(4, error);
+  assert(error.empty());
+  assert(raw_only_device.size() == 1);
+  assert(raw_only_device[0].device_id == "mouse-c");
+  assert(raw_only_device[0].raw_motion_count == 1);
+  assert(raw_only_device[0].episode_count == 0);
+  assert(!raw_only_device[0].device_path_distance_sum);
+  assert(raw_only_device[0].device_path_distance_available_count == 0);
+  assert(raw_only_device[0].device_path_distance_unavailable_count == 0);
+  assert(!raw_only_device[0].compositor_path_distance_sum);
+  assert(raw_only_device[0].compositor_path_distance_available_count == 0);
+  assert(raw_only_device[0].compositor_path_distance_unavailable_count == 0);
+  assert(repository->device_summaries_for_session(5, error).empty());
+  assert(error.empty());
+  assert(repository->device_summaries_for_session(3, error).empty());
+  assert(error.empty());
 
   const auto episodes = repository->episodes_for_run(1, error);
   assert(error.empty());
@@ -221,7 +311,9 @@ int main(int argc, char** argv) {
       "WHERE episode_id=12 AND ordinal=2");
   assert(compositor_value_before == 110.0);
   error.clear();
-  assert(repository->completed_runs(error).size() == 2);
+  assert(repository->completed_runs(error).size() == 4);
+  assert(repository->completed_sessions(error).size() == 4);
+  assert(repository->device_summaries_for_session(1, error).size() == 2);
   assert(repository->episodes_for_run(1, error).size() == 2);
   assert(repository->trajectory_for_episode(11, error).size() == 3);
   assert(error.empty());
