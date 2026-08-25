@@ -969,8 +969,7 @@ session_id = collector_runs.run_id
 Only runs with `ended_wallclock_us IS NOT NULL` are sessions. Runs without a
 persisted completion timestamp are excluded. A completed run with zero episodes
 is still a valid session. The model does not add a `sessions` table, group
-multiple runs,
-or infer session boundaries from inactivity or restart gaps.
+multiple runs, or infer session boundaries from inactivity or restart gaps.
 
 The existing run, episode, raw-event, context, and correlation tables remain
 the provenance source. Session summaries are computed when queried; they do not
