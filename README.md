@@ -1,11 +1,11 @@
 # Mouseprint
 
-Mouseprint is a local pointing-device observatory for Omarchy/Hyprland. The
-current implementation includes native libinput evidence capture with separate
-Hyprland compositor context, local SQLite persistence, and read-only Qt Quick
-inspection through Slices 6 and 7A-7C.
+Mouseprint is a local pointing-device observatory for Omarchy/Hyprland. It
+captures native libinput evidence with separate Hyprland compositor context and
+local SQLite persistence. A read-only Qt Quick inspector presents the retained
+evidence and derived products.
 
-## Shipped foundation: Slices 1-7
+## Shipped foundation
 
 The collector creates a non-exclusive libinput udev context on `seat0` and
 reports pointer-capable device lifecycle events, motion, buttons, and scroll
@@ -59,29 +59,23 @@ create artificial movement. Monitor-normalized coordinates are not produced;
 monitor geometry is not currently retained as evidence and is a follow-up
 design finding.
 
-## Slices 6 and 7
+## Read-only inspection and sessions
 
 The read-only inspector uses the existing `QueryRepository` with
-`SQLITE_OPEN_READONLY` and `PRAGMA query_only=ON`. It shows completed
-collector-run-backed sessions, movement episode metrics, separate
-device/compositor trajectories, trajectory provenance, correlation statuses,
-and explicit unavailable values or trajectory gaps. It does not modify the
-collector database or derive metrics in QML.
+`SQLITE_OPEN_READONLY` and `PRAGMA query_only=ON`. It does not change the
+collector database or calculate metrics in QML.
 
-Slice 7 uses a query-time session model: one completed collector run is one
-Mouseprint session. Only completed runs are sessions; there is no persisted
-session table, cross-run grouping, or inferred session boundary. The inspector
-supports recent-session selection and switching, selected-session summaries,
-per-device summaries, exact correlation and metric-status counts, and correct
-handling of zero-input, raw-only, and zero-episode sessions. Session changes
-clear stale episode, trajectory, and provenance state.
+* A session is one completed collector run. Incomplete runs are not sessions.
+* The inspector selects recent sessions and lets the user switch sessions.
+* It shows session summaries, per-device summaries, episode metrics, correlation
+  statuses, and trajectory provenance.
+* It shows one complete selected movement episode with separate device-space and
+  compositor-space trajectories where available.
+* Aggregates show available and unavailable values separately. Missing values are
+  not changed to zero, and trajectory gaps are not filled in.
 
-Session-level descriptive aggregates include compositor-space path distance over
-available episode values, compositor path available/unavailable counts, and the
-device directional reversal total with its available/unavailable counts.
-Unavailable values remain unavailable and legitimate zero values remain zero.
-There is no cross-device device-space path total. Compositor path totals exclude
-unavailable episodes and do not imply uninterrupted cursor travel.
+There is no persisted session table, cross-run grouping, or inferred session
+boundary.
 
 Build it with:
 
@@ -95,9 +89,9 @@ Launch it with an explicit database:
 ./build/mouseprint-inspector --database PATH
 ```
 
-The inspector reads completed runs read-only, initially selecting the most recent
-completed session. Cross-run or manual session grouping, normalized spatial
-products, click/scroll semantics, collector-transform aggregates, configurable
+The inspector reads completed runs only and initially selects the most recent
+session. Cross-run or manual session grouping, normalized spatial products,
+click and scroll semantics, collector-transform aggregation, configurable
 segmentation, and pause/clear controls remain deferred.
 
 ## Build
