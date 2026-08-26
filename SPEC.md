@@ -143,11 +143,14 @@ raw_input_events            pointer_context
  movement_episode_members   movement_episode_trajectory_points
                    \            /
                     \          /
+                       v        v
+                  QueryRepository
+                     /          \
+                    v            v
+        episode/trajectory data  query-time sessions/summaries
+                     \          /
                       v        v
-                 read-only inspection UI
-                          |
-                          v
-                 query-time sessions/summaries
+                  read-only inspection UI
 
 future: spatial products, profiles, and higher-level interpretation
 ```
