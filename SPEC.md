@@ -128,29 +128,17 @@ judgment from the current metrics.
 Use separate evidence and interpretation layers.
 
 ```text
-raw_input_events            pointer_context
-       |                          |
-       |                          |
-       +---------- input_context_matches
-                         |
-                         v
-                episode derivation
-                         |
-                         v
-                movement_episodes
-                    /          \
-                   v            v
- movement_episode_members   movement_episode_trajectory_points
-                   \            /
-                    \          /
-                       v        v
-                  QueryRepository
-                     /          \
-                    v            v
-        episode/trajectory data  query-time sessions/summaries
-                     \          /
-                      v        v
-                  read-only inspection UI
+run/device/raw-input/context/correlation evidence
+                    | \
+                    |  +------------------------> QueryRepository
+                    v                             (sessions/summaries,
+             episode derivation                   raw-only/zero-episode)
+                    |
+       episode/member/trajectory products
+                    +--------------------------> QueryRepository
+                                                       |
+                                                       v
+                                            read-only inspection UI
 
 future: spatial products, profiles, and higher-level interpretation
 ```
@@ -992,8 +980,8 @@ Session summaries show:
 * a session-level device directional-reversal total, with available and
   unavailable value counts;
 * device and compositor metric availability/status counts;
-* per-episode observation/distribution material for path efficiency, velocity,
-  compositor displacement, and directional reversals.
+* per-episode observations for path efficiency, compositor displacement, and
+  directional reversals.
 
 Device path totals are sums of available episode distances in raw device units,
 not physical centimeters. Compositor path totals do not imply uninterrupted
